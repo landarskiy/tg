@@ -2919,7 +2919,8 @@ class CallingAnimationViewFrameLayout extends FrameLayout {
 
 class WaveAvatar extends BackupImageView {
 
-    private boolean pulseAnimation = false;
+    private boolean startPulseAnimation = false;
+    private boolean stopPulseAnimation = false;
     private boolean waveAnimationEnabled = true;
     AvatarWavesDrawable avatarWavesDrawable;
 
@@ -3021,8 +3022,11 @@ class WaveAvatar extends BackupImageView {
     }
 
     public void startPulseAnimation() {
-        pulseAnimation = true;
+        if (startPulseAnimation && isPulseAnimationRunning()) {
+            return;
+        }
         cancelPulseAnimation();
+        startPulseAnimation = true;
         final long duration = 1_000;
         final float min = 0.9f;
         final float max = 1.05f;
@@ -3049,11 +3053,14 @@ class WaveAvatar extends BackupImageView {
     }
 
     public void stopPulseAnimation() {
-        pulseAnimation = false;
+        if(stopPulseAnimation && isPulseAnimationRunning()) {
+            return;
+        }
         cancelPulseAnimation();
         if (getScaleX() == 1) {
             return;
         }
+        stopPulseAnimation = true;
         pulseAnimator = ValueAnimator.ofFloat(getScaleX(), 1f);
         pulseAnimator.setDuration(300);
         pulseAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
@@ -3067,9 +3074,16 @@ class WaveAvatar extends BackupImageView {
     }
 
     public void cancelPulseAnimation() {
+        Log.d("VOIP_FRAGMENT", "Cancel pulse animation");
         if(pulseAnimator != null) {
             pulseAnimator.cancel();
+            startPulseAnimation = false;
+            stopPulseAnimation = false;
         }
+    }
+
+    public boolean isPulseAnimationRunning() {
+        return pulseAnimator != null && pulseAnimator.isRunning();
     }
 
     @Override
@@ -3084,14 +3098,6 @@ class WaveAvatar extends BackupImageView {
         }
         setScaleX(1f);
         setScaleY(1f);
-    }
-
-    @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        if (pulseAnimation) {
-            startPulseAnimation();
-        }
     }
 }
 
