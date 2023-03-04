@@ -2389,6 +2389,9 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					return;
 				}
 				NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.webRtcMicAmplitudeEvent, levels[0]);
+				if(levels.length > 1) {
+					NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.webRtcSpeakerAmplitudeEvent, levels[1]);
+				}
 			});
 			tgVoip[CAPTURE_DEVICE_CAMERA].setOnStateUpdatedListener(this::onConnectionStateChanged);
 			tgVoip[CAPTURE_DEVICE_CAMERA].setOnSignalBarsUpdatedListener(this::onSignalBarCountChanged);
@@ -3696,6 +3699,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				FileLog.d("proximity " + newIsNear);
 			}
 			isProximityNear = newIsNear;
+			NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proximityChanged, newIsNear);
 			try {
 				if (isProximityNear) {
 					proximityWakelock.acquire();
