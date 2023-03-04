@@ -40,8 +40,10 @@ public class BlobDrawable {
     public Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private float[] radius;
+    private float[] radiusRandom;
     private float[] angle;
     private float[] radiusNext;
+    private float[] radiusNextRandom;
     private float[] angleNext;
     private float[] progress;
     private float[] speed;
@@ -62,24 +64,27 @@ public class BlobDrawable {
         N = n;
         L = (float) ((4.0 / 3.0) * Math.tan(Math.PI / (2 * N)));
         radius = new float[n];
+        radiusRandom = new float[n];
         angle = new float[n];
 
         radiusNext = new float[n];
+        radiusNextRandom = new float[n];
         angleNext = new float[n];
         progress = new float[n];
         speed = new float[n];
 
         for (int i = 0; i < N; i++) {
-            generateBlob(radius, angle, i);
-            generateBlob(radiusNext, angleNext, i);
+            generateBlob(radius, radiusRandom, angle, i);
+            generateBlob(radiusNext, radiusNextRandom, angleNext, i);
             progress[i] = 0;
         }
     }
 
-    private void generateBlob(float[] radius, float[] angle, int i) {
+    private void generateBlob(float[] radius, float[] radiusRandom, float[] angle, int i) {
         float angleDif = 360f / N * 0.05f;
         float radDif = maxRadius - minRadius;
-        radius[i] = minRadius + Math.abs(((random.nextInt() % 100f) / 100f)) * radDif;
+        radiusRandom[i] = Math.abs(((random.nextInt() % 100f) / 100f));
+        radius[i] = minRadius + radiusRandom[i] * radDif;
         angle[i] = 360f / N * i + ((random.nextInt() % 100f) / 100f) * angleDif;
         speed[i] = (float) (0.017 + 0.003 * (Math.abs(random.nextInt() % 100f) / 100f));
     }
@@ -94,7 +99,8 @@ public class BlobDrawable {
                 progress[i] = 0;
                 radius[i] = radiusNext[i];
                 angle[i] = angleNext[i];
-                generateBlob(radiusNext, angleNext, i);
+                radiusRandom[i] = radiusNextRandom[i];
+                generateBlob(radiusNext, radiusNextRandom, angleNext, i);
             }
         }
     }
@@ -153,12 +159,21 @@ public class BlobDrawable {
 
     public void generateBlob() {
         for (int i = 0; i < N; i++) {
-            generateBlob(radius, angle, i);
-            generateBlob(radiusNext, angleNext, i);
+            generateBlob(radius, radiusRandom, angle, i);
+            generateBlob(radiusNext, radiusNextRandom, angleNext, i);
             progress[i] = 0;
         }
     }
 
+    public void setRadius(float minRadius, float maxRadius) {
+        this.minRadius = minRadius;
+        this.maxRadius = maxRadius;
+        float radDif = maxRadius - minRadius;
+        for (int i = 0; i < N; i++) {
+            radius[i] = minRadius + radiusRandom[i] * radDif;
+            radiusNext[i] = minRadius + radiusNextRandom[i] * radDif;
+        }
+    }
 
     private float animateToAmplitude;
     public float amplitude;

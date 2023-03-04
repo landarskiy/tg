@@ -27,6 +27,8 @@ import android.transition.TransitionManager;
 import android.transition.TransitionSet;
 import android.transition.TransitionValues;
 import android.transition.Visibility;
+import android.util.AttributeSet;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -45,6 +47,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.ToggleButton;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
@@ -55,11 +59,11 @@ import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.ImageLocation;
-import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
@@ -73,11 +77,14 @@ import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.DarkAlertDialog;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AlertsCreator;
+import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackgroundGradientDrawable;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.BlobDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.HintView;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MulticolorMotionBackgroundDrawable;
 import org.telegram.ui.Components.voip.AcceptDeclineView;
 import org.telegram.ui.Components.voip.PrivateVideoPreviewDialog;
 import org.telegram.ui.Components.voip.VoIPButtonsLayout;
@@ -115,11 +122,16 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
     private ViewGroup fragmentView;
     private VoIPOverlayBackground overlayBackground;
 
+    private CallingAnimationViewFrameLayout callingAnimationView;
+
     private BackupImageView callingUserPhotoView;
-    private BackupImageView callingUserPhotoViewMini;
+    private WaveAvatar callingUserPhotoViewMini;
+
+    private IdleDetectorFrameLayout idleDetector;
 
     private TextView callingUserTitle;
 
+    private int signalBarCount = Integer.MAX_VALUE;
     private VoIPStatusTextView statusTextView;
     private ImageView backIcon;
     private ImageView speakerPhoneIcon;
@@ -146,7 +158,9 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
     Paint overlayPaint = new Paint();
     Paint overlayBottomPaint = new Paint();
 
+    boolean wasEstablished = false;
     boolean isOutgoing;
+    boolean callingIsVideoState;
     boolean callingUserIsVideo;
     boolean currentUserIsVideo;
 
@@ -232,6 +246,10 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
     private boolean canZoomGesture;
     ValueAnimator zoomBackAnimator;
     /* === pinch to zoom === */
+
+    boolean hasCallerVoice;
+    float micAmplitude;
+    float speakerAmplitude;
 
     public static void show(Activity activity, int account) {
         show(activity, false, account);
@@ -427,6 +445,9 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.voipServiceCreated);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.emojiLoaded);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.closeInCallActivity);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.webRtcSpeakerAmplitudeEvent);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.webRtcMicAmplitudeEvent);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proximityChanged);
     }
 
     private void destroy() {
@@ -437,6 +458,9 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.voipServiceCreated);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiLoaded);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.closeInCallActivity);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.webRtcSpeakerAmplitudeEvent);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.webRtcMicAmplitudeEvent);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proximityChanged);
     }
 
     @Override
@@ -464,13 +488,45 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
             updateKeyView(true);
         } else if (id == NotificationCenter.closeInCallActivity) {
             windowView.finish();
+        } else if (id == NotificationCenter.webRtcMicAmplitudeEvent) {
+            if (VoIPService.getSharedInstance() == null || VoIPService.getSharedInstance().isMicMute()) {
+                micAmplitude = 0;
+            } else {
+                float a = (float) args[0];
+                micAmplitude = Math.max(0, Math.min(a, 1));
+            }
+            if (VoIPService.getSharedInstance() != null && !hasCallerVoice) {
+                callingUserPhotoViewMini.setAmplitude(micAmplitude);
+            }
+        } else if (id == NotificationCenter.webRtcSpeakerAmplitudeEvent) {
+            hasCallerVoice = true;
+            float a = (float) args[0];
+            speakerAmplitude = Math.max(0, Math.min(a, 1));
+            if (VoIPService.getSharedInstance() != null) {
+                callingUserPhotoViewMini.setAmplitude(speakerAmplitude);
+            }
+        } else if (id == NotificationCenter.proximityChanged) {
+            if((boolean) args[0] && currentState == VoIPService.STATE_ESTABLISHED) {
+                callingUserPhotoViewMini.setWaveAnimationEnabled(false, false);
+            }
         }
     }
 
     @Override
     public void onSignalBarsCountChanged(int count) {
+        boolean signalChanged = count != signalBarCount;
+        signalBarCount = count;
         if (statusTextView != null) {
             statusTextView.setSignalBarCount(count);
+            boolean callCondition = currentState == VoIPService.STATE_ESTABLISHED || currentState == VoIPService.STATE_RECONNECTING;
+            if (signalChanged && callCondition && wasEstablished) {
+                Log.d("VOIP_FRAGMENT", "Signal changed to " + count);
+                if (count <= 1) {
+                    callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WEAK);
+                } else {
+                    callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_ESTABLISHED);
+                }
+            }
         }
     }
 
@@ -516,11 +572,11 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
             @Override
             protected void dispatchDraw(Canvas canvas) {
                 super.dispatchDraw(canvas);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH && lastInsets != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH && lastInsets != null && isVideoMode()) {
                     canvas.drawRect(0, 0, getMeasuredWidth(), lastInsets.getSystemWindowInsetTop(), overlayPaint);
                 }
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH && lastInsets != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH && lastInsets != null && isVideoMode()) {
                     canvas.drawRect(0, getMeasuredHeight() - lastInsets.getSystemWindowInsetBottom(), getMeasuredWidth(), getMeasuredHeight(), overlayBottomPaint);
                 }
             }
@@ -673,6 +729,8 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         updateSystemBarColors();
         fragmentView = frameLayout;
         frameLayout.setFitsSystemWindows(true);
+
+        callingAnimationView = new CallingAnimationViewFrameLayout(context);
         callingUserPhotoView = new BackupImageView(context) {
 
             int blackoutColor = ColorUtils.setAlphaComponent(Color.BLACK, (int) (255 * 0.3f));
@@ -691,6 +749,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         //     callingUserTextureView.attachBackgroundRenderer();
 
         frameLayout.addView(callingUserPhotoView);
+        frameLayout.addView(callingAnimationView);
         frameLayout.addView(callingUserTextureView);
 
 
@@ -705,12 +764,12 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         overlayBackground = new VoIPOverlayBackground(context);
         overlayBackground.setVisibility(View.GONE);
 
-        callingUserPhotoView.getImageReceiver().setDelegate((imageReceiver, set, thumb, memCache) -> {
+        /*callingUserPhotoView.getImageReceiver().setDelegate((imageReceiver, set, thumb, memCache) -> {
             ImageReceiver.BitmapHolder bmp = imageReceiver.getBitmapSafe();
             if (bmp != null) {
                 overlayBackground.setBackground(bmp);
             }
-        });
+        });*/
 
         callingUserPhotoView.setImage(ImageLocation.getForUserOrChat(callingUser, ImageLocation.TYPE_BIG), null, gradientDrawable, callingUser);
 
@@ -776,6 +835,8 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         topShadow.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{ColorUtils.setAlphaComponent(Color.BLACK, (int) (255 * 0.4f)), Color.TRANSPARENT}));
         frameLayout.addView(topShadow, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 140, Gravity.TOP));
 
+        topShadow.setAlpha(0f);
+        bottomShadow.setAlpha(0f);
 
         emojiLayout = new LinearLayout(context) {
             @Override
@@ -840,8 +901,13 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         statusLayout.setFocusable(true);
         statusLayout.setFocusableInTouchMode(true);
 
-        callingUserPhotoViewMini = new BackupImageView(context);
-        callingUserPhotoViewMini.setImage(ImageLocation.getForUserOrChat(callingUser, ImageLocation.TYPE_SMALL), null, Theme.createCircleDrawable(AndroidUtilities.dp(135), 0xFF000000), callingUser);
+        callingUserPhotoViewMini = new WaveAvatar(context);
+        if(callingUser.photo != null) {
+            callingUserPhotoViewMini.setImage(ImageLocation.getForUserOrChat(callingUser, ImageLocation.TYPE_SMALL), null, Theme.createCircleDrawable(AndroidUtilities.dp(135), 0xFF000000), callingUser);
+        } else {
+            AvatarDrawable avatarDrawable = new AvatarDrawable(callingUser);
+            callingUserPhotoViewMini.setImageDrawable(avatarDrawable);
+        }
         callingUserPhotoViewMini.setRoundRadius(AndroidUtilities.dp(135) / 2);
         callingUserPhotoViewMini.setVisibility(View.GONE);
 
@@ -976,6 +1042,13 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         tapToVideoTooltip.setBottomOffset(AndroidUtilities.dp(4));
         tapToVideoTooltip.setVisibility(View.GONE);
 
+        idleDetector = new IdleDetectorFrameLayout(context);
+        idleDetector.listener = isIdle -> {
+            callingAnimationView.setEnabledBackgroundAnimation(!isIdle);
+            callingUserPhotoViewMini.setWaveAnimationEnabled(!isIdle, true);
+        };
+        frameLayout.addView(idleDetector, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
         updateViewState();
 
         VoIPService service = VoIPService.getSharedInstance();
@@ -1097,8 +1170,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         emojiLayout.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         statusLayout.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         buttonsLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-        bottomShadow.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-        topShadow.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+        hideShadows();
         callingUserMiniFloatingLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
         notificationsLayout.animate().alpha(0).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
 
@@ -1167,8 +1239,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 emojiLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 statusLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 buttonsLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-                bottomShadow.animate().alpha(1f).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-                topShadow.animate().alpha(1f).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+                showShadows();
                 notificationsLayout.animate().alpha(1f).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
                 callingUserPhotoView.animate().alpha(1f).setDuration(350).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
 
@@ -1374,22 +1445,19 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         boolean showAcceptDeclineView = false;
         boolean showTimer = false;
         boolean showReconnecting = false;
-        boolean showCallingAvatarMini = false;
+        boolean showCallingAvatarMini = true;
         int statusLayoutOffset = 0;
         VoIPService service = VoIPService.getSharedInstance();
 
         switch (currentState) {
             case VoIPService.STATE_WAITING_INCOMING:
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
+                callingUserPhotoViewMini.startPulseAnimation();
                 showAcceptDeclineView = true;
                 lockOnScreen = true;
                 statusLayoutOffset = AndroidUtilities.dp(24);
                 acceptDeclineView.setRetryMod(false);
                 if (service != null && service.privateCall.video) {
-                    if (currentUserIsVideo && callingUser.photo != null) {
-                        showCallingAvatarMini = true;
-                    } else {
-                        showCallingAvatarMini = false;
-                    }
                     statusTextView.setText(LocaleController.getString("VoipInVideoCallBranding", R.string.VoipInVideoCallBranding), true, animated);
                     acceptDeclineView.setTranslationY(-AndroidUtilities.dp(60));
                 } else {
@@ -1399,23 +1467,31 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 break;
             case VoIPService.STATE_WAIT_INIT:
             case VoIPService.STATE_WAIT_INIT_ACK:
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 statusTextView.setText(LocaleController.getString("VoipConnecting", R.string.VoipConnecting), true, animated);
                 break;
             case VoIPService.STATE_EXCHANGING_KEYS:
                 statusTextView.setText(LocaleController.getString("VoipExchangingKeys", R.string.VoipExchangingKeys), true, animated);
                 break;
             case VoIPService.STATE_WAITING:
+                callingUserPhotoViewMini.startPulseAnimation();
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 statusTextView.setText(LocaleController.getString("VoipWaiting", R.string.VoipWaiting), true, animated);
                 break;
             case VoIPService.STATE_RINGING:
+                callingUserPhotoViewMini.startPulseAnimation();
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 statusTextView.setText(LocaleController.getString("VoipRinging", R.string.VoipRinging), true, animated);
                 break;
             case VoIPService.STATE_REQUESTING:
+                callingUserPhotoViewMini.startPulseAnimation();
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 statusTextView.setText(LocaleController.getString("VoipRequesting", R.string.VoipRequesting), true, animated);
                 break;
             case VoIPService.STATE_HANGING_UP:
                 break;
             case VoIPService.STATE_BUSY:
+                callingUserPhotoViewMini.stopPulseAnimation();
                 showAcceptDeclineView = true;
                 statusTextView.setText(LocaleController.getString("VoipBusy", R.string.VoipBusy), false, animated);
                 acceptDeclineView.setRetryMod(true);
@@ -1424,17 +1500,32 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 break;
             case VoIPService.STATE_ESTABLISHED:
             case VoIPService.STATE_RECONNECTING:
+                callingUserPhotoViewMini.stopPulseAnimation();
                 updateKeyView(animated);
                 showTimer = true;
                 if (currentState == VoIPService.STATE_RECONNECTING) {
                     showReconnecting = true;
+                    if(wasEstablished) {
+                        callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WEAK);
+                    }
+                } else {
+                    wasEstablished = true;
+                    if(signalBarCount <= 1) {
+                        callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WEAK);
+                    } else {
+                        callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_ESTABLISHED);
+                    }
                 }
                 break;
             case VoIPService.STATE_ENDED:
+                callingUserPhotoViewMini.stopPulseAnimation();
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 currentUserTextureView.saveCameraLastBitmap();
                 AndroidUtilities.runOnUIThread(() -> windowView.finish(), 200);
                 break;
             case VoIPService.STATE_FAILED:
+                callingUserPhotoViewMini.stopPulseAnimation();
+                callingAnimationView.setState(CallingAnimationViewFrameLayout.INTERNAL_STATE_WAITING);
                 statusTextView.setText(LocaleController.getString("VoipFailed", R.string.VoipFailed), false, animated);
                 final VoIPService voipService = VoIPService.getSharedInstance();
                 final String lastError = voipService != null ? voipService.getLastError() : Instance.ERROR_UNKNOWN;
@@ -1498,7 +1589,10 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 }
                 break;
         }
+        printState();
+        idleDetector.setState(currentState);
         if (previewDialog != null) {
+            updateVideoState();
             return;
         }
 
@@ -1529,9 +1623,11 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 callingUserIsVideo = false;
             }
         }
+        updateVideoState();
 
         if (currentUserIsVideo || callingUserIsVideo) {
             fillNavigationBar(true, animated);
+            showCallingAvatarMini = false;
         } else {
             fillNavigationBar(false, animated);
             callingUserPhotoView.setVisibility(View.VISIBLE);
@@ -1700,6 +1796,55 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
         updateSpeakerPhoneIcon();
     }
 
+    private void printState() {
+        String stateName;
+        switch (currentState) {
+            case VoIPService.STATE_WAITING_INCOMING:
+                stateName = "STATE_WAITING_INCOMING";
+                break;
+            case VoIPService.STATE_WAIT_INIT:
+                stateName = "STATE_WAIT_INIT";
+                break;
+            case VoIPService.STATE_WAIT_INIT_ACK:
+                stateName = "STATE_WAIT_INIT_ACK";
+                break;
+            case VoIPService.STATE_EXCHANGING_KEYS:
+                stateName = "STATE_EXCHANGING_KEYS";
+                break;
+            case VoIPService.STATE_WAITING:
+                stateName = "STATE_WAITING";
+                break;
+            case VoIPService.STATE_RINGING:
+                stateName = "STATE_RINGING";
+                break;
+            case VoIPService.STATE_REQUESTING:
+                stateName = "STATE_REQUESTING";
+                break;
+            case VoIPService.STATE_HANGING_UP:
+                stateName = "STATE_HANGING_UP";
+                break;
+            case VoIPService.STATE_BUSY:
+                stateName = "STATE_BUSY";
+                break;
+            case VoIPService.STATE_ESTABLISHED:
+                stateName = "STATE_ESTABLISHED";
+                break;
+            case VoIPService.STATE_RECONNECTING:
+                stateName = "STATE_RECONNECTING";
+                break;
+            case VoIPService.STATE_ENDED:
+                stateName = "STATE_ENDED";
+                break;
+            case VoIPService.STATE_FAILED:
+                stateName = "STATE_FAILED";
+                break;
+            default:
+                stateName = "UNKNOWN";
+
+        }
+        Log.d("VOIP_FRAGMENT", "Call state changed to " + stateName);
+    }
+
     private void fillNavigationBar(boolean fill, boolean animated) {
         if (switchingToPip) {
             return;
@@ -1734,8 +1879,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
             emojiLayout.animate().alpha(0).translationY(-AndroidUtilities.dp(50)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             statusLayout.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             buttonsLayout.animate().alpha(0).translationY(AndroidUtilities.dp(50)).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-            bottomShadow.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-            topShadow.animate().alpha(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            hideShadows();
             uiVisibilityAnimator = ValueAnimator.ofFloat(uiVisibilityAlpha, 0);
             uiVisibilityAnimator.addUpdateListener(statusbarAnimatorListener);
             uiVisibilityAnimator.setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT);
@@ -1750,8 +1894,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
             emojiLayout.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             statusLayout.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
             buttonsLayout.animate().alpha(1f).translationY(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-            bottomShadow.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
-            topShadow.animate().alpha(1f).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            showShadows();
             uiVisibilityAnimator = ValueAnimator.ofFloat(uiVisibilityAlpha, 1f);
             uiVisibilityAnimator.addUpdateListener(statusbarAnimatorListener);
             uiVisibilityAnimator.setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT);
@@ -2153,7 +2296,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
 
     private void setFrontalCameraAction(VoIPToggleButton bottomButton, VoIPService service, boolean animated) {
         if (!currentUserIsVideo) {
-            bottomButton.setData(R.drawable.calls_flip,  ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.5f)), ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.12f)), LocaleController.getString("VoipFlip", R.string.VoipFlip), false, animated);
+            bottomButton.setData(R.drawable.calls_flip, ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.5f)), ColorUtils.setAlphaComponent(Color.WHITE, (int) (255 * 0.12f)), LocaleController.getString("VoipFlip", R.string.VoipFlip), false, animated);
             bottomButton.setOnClickListener(null);
             bottomButton.setEnabled(false);
         } else {
@@ -2317,6 +2460,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
     }
 
     public void onPauseInternal() {
+        Log.d("VOIP_FRAGMENT", "Pause");
         PowerManager pm = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
 
         boolean screenOn;
@@ -2349,6 +2493,7 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
     }
 
     public void onResumeInternal() {
+        Log.d("VOIP_FRAGMENT", "Resume");
         if (VoIPPiPView.getInstance() != null) {
             VoIPPiPView.finish();
         }
@@ -2387,5 +2532,718 @@ public class VoIPFragment implements VoIPService.StateListener, NotificationCent
                 }
             }).show();
         }
+    }
+
+    public void updateVideoState() {
+        boolean newState = isVideoMode();
+        if (callingIsVideoState == newState) {
+            return;
+        }
+        callingIsVideoState = newState;
+        if (!newState) {
+            hideShadows();
+        } else {
+            showShadows();
+        }
+    }
+
+    public boolean isVideoMode() {
+        return callingUserIsVideo || currentUserIsVideo;
+    }
+
+    private void showShadows() {
+        animateShadows(1f);
+    }
+
+    private void hideShadows() {
+        animateShadows(0f);
+    }
+
+    private void animateShadows(float targetAlpha) {
+        bottomShadow.animate().alpha(targetAlpha).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+        topShadow.animate().alpha(targetAlpha).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+    }
+}
+
+class CallingAnimationViewFrameLayout extends FrameLayout {
+
+    /*
+     Blue-Violet	        Main	Light	Dark
+     Top right corner	    3F8BEA	57A1FF	287AE1
+     Bottom right corner	B456D8	D664FF	A736D0
+     Bottom left corner	    8148EC	9258FD	6A2BDD
+     Top left corner	    20A4D7	2DC0F9	0F95C9
+
+     Blue-Green	            Main	Light	Dark
+     Top right corner	    17AAE4	28C2FF	0291C9
+     Bottom right corner	4576E9	558BFF	2D60D6
+     Bottom left corner	    3B7AF1	5FABFF	2C6ADF
+     Top left corner	    08B0A3	04DCCC	009595
+
+     Green	                Main	Light	Dark
+     Top right corner	    5AB147	6DD957	319D27
+     Bottom right corner	07A9AC	00D2D5	008B8E
+     Bottom left corner	    07BA63	09E279	01934C
+     Top left corner	    A9CC66	C7EF60	8FBD37
+
+     Orange-Red	            Main	Light	Dark
+     Top right corner	    DE7238	FF8E51	D75A16
+     Bottom right corner	E86958	FF7866	E23F29
+     Bottom left corner	    E7618F	FF82A5	E6306F
+     Top left corner	    DB904C	FEB055	C77616
+     */
+    final int[] blueVioletMain = {0x3F8BEA, 0xB456D8, 0x8148EC, 0x20A4D7};
+    final int[] blueVioletLight = {0x57A1FF, 0xD664FF, 0x9258FD, 0x2DC0F9};
+    final int[] blueVioletDark = {0x287AE1, 0xA736D0, 0x6A2BDD, 0x0F95C9};
+
+    final int[] blueGreenMain = {0x17AAE4, 0x4576E9, 0x3B7AF1, 0x08B0A3};
+    final int[] blueGreenLight = {0x28C2FF, 0x558BFF, 0x5FABFF, 0x04DCCC};
+    final int[] blueGreenDark = {0x0291C9, 0x2D60D6, 0x2C6ADF, 0x009595};
+
+    final int[] greenMain = {0x5AB147, 0x07A9AC, 0x07BA63, 0xA9CC66};
+    final int[] greenLight = {0x6DD957, 0x00D2D5, 0x09E279, 0xC7EF60};
+    final int[] greenDark = {0x319D27, 0x008B8E, 0x01934C, 0x8FBD37};
+
+    final int[] orangeRedMain = {0xDE7238, 0xE86958, 0xE7618F, 0xDB904C};
+    final int[] orangeRedLight = {0xFF8E51, 0xFF7866, 0xFF82A5, 0xFEB055};
+    final int[] orangeRedDark = {0xD75A16, 0xE23F29, 0xE6306F, 0xC77616};
+
+    final int[][] waitingDark = {blueVioletDark, blueGreenDark, blueVioletDark};
+    final int[][] waitingLight = {blueVioletLight, blueGreenLight, blueVioletLight};
+    final int[][] waitingMain = {blueVioletMain, blueGreenMain, blueVioletMain};
+
+    final int[][] establishedDark = {greenDark, blueVioletDark, blueGreenDark, greenDark};
+    final int[][] establishedLight = {greenLight, blueVioletLight, blueGreenLight, greenLight};
+    final int[][] establishedMain = {greenMain, blueVioletMain, blueGreenMain, greenMain};
+
+    final int[][] weakDark = {orangeRedDark, orangeRedDark};
+    final int[][] weakLight = {orangeRedLight, orangeRedLight};
+    final int[][] weakMain = {orangeRedMain, orangeRedMain};
+
+    private static final long DURATION = 8000;
+    private static final float PHASES_COUNT = 8f;
+
+    public static final int INTERNAL_STATE_WAITING = 0;
+    public static final int INTERNAL_STATE_ESTABLISHED = 1;
+    public static final int INTERNAL_STATE_WEAK = 2;
+
+    private int currentState = -1;
+
+    private int currentColorIndex = 0;
+
+    private int[][] currentColors = waitingMain;
+    private int[][] currentMainColors = waitingMain;
+    private long playTime = (long) (DURATION / PHASES_COUNT);
+    private ValueAnimator callingDrawableAnimator;
+    private ValueAnimator callingDrawableColorsAnimator;
+    private MulticolorMotionBackgroundDrawable callingDrawable;
+    private boolean backgroundAnimationEnabled = true;
+    private boolean attachedToWindow = false;
+
+    public CallingAnimationViewFrameLayout(@NonNull Context context) {
+        this(context, null);
+    }
+
+    public CallingAnimationViewFrameLayout(@NonNull Context context, @Nullable AttributeSet attrs) {
+        this(context, attrs, 0);
+    }
+
+    public CallingAnimationViewFrameLayout(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        init();
+    }
+
+    private void init() {
+        setWillNotDraw(false);
+        callingDrawable = new MulticolorMotionBackgroundDrawable();
+        setState(INTERNAL_STATE_WAITING, false);
+        setBackground(callingDrawable);
+    }
+
+    private void setColors(int[] colors) {
+        //0 - right
+        //1 - bottom
+        //2 - left
+        //3 - top
+        callingDrawable.setColors(colors[0], colors[1], colors[2], colors[3]);
+        invalidate();
+    }
+
+    public void setState(int state) {
+        setState(state, true);
+    }
+
+    private void setState(int state, boolean animated) {
+        if (state == currentState) {
+            return;
+        }
+        currentState = state;
+        //check theme changing
+        currentColors = getCurrentStateColors();
+        currentMainColors = getCurrentStateMainColors();
+        currentColorIndex = 0;
+        if (animated) {
+            animateColorsTransition(currentColors, currentColorIndex);
+        } else {
+            setColors(currentColors[currentColorIndex]);
+        }
+        setEnabledBackgroundAnimation(true);
+    }
+
+    private int[][] getCurrentStateColors() {
+        switch (currentState) {
+            // “Green”, “Blue-Violet” and “Blue-Green”
+            case INTERNAL_STATE_ESTABLISHED:
+                return getEstablished();
+            // “Orange-Red”
+            case INTERNAL_STATE_WEAK:
+                return getWeak();
+            // “Blue-Violet” and “Blue-Green”
+            default:
+                return getWaiting();
+        }
+    }
+
+    private int[][] getCurrentStateMainColors() {
+        switch (currentState) {
+            // “Green”, “Blue-Violet” and “Blue-Green”
+            case INTERNAL_STATE_ESTABLISHED:
+                return establishedMain;
+            // “Orange-Red”
+            case INTERNAL_STATE_WEAK:
+                return weakMain;
+            // “Blue-Violet” and “Blue-Green”
+            default:
+                return waitingMain;
+        }
+    }
+
+    private int[][] getWaiting() {
+        if (isDark()) {
+            return waitingDark;
+        } else {
+            return waitingLight;
+        }
+    }
+
+    private int[][] getEstablished() {
+        if (isDark()) {
+            return establishedDark;
+        } else {
+            return establishedLight;
+        }
+    }
+
+    private int[][] getWeak() {
+        if (isDark()) {
+            return weakDark;
+        } else {
+            return weakLight;
+        }
+    }
+
+    private boolean isDark() {
+        return Theme.getCurrentTheme().isDark();
+    }
+
+    @Override
+    protected void onVisibilityChanged(@NonNull View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        checkBackgroundAnimation();
+        checkColorAnimation();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        attachedToWindow = true;
+        checkBackgroundAnimation();
+        checkColorAnimation();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        attachedToWindow = false;
+        checkBackgroundAnimation();
+        checkColorAnimation();
+    }
+
+    private boolean isViewPresentToUser() {
+        return attachedToWindow && getVisibility() == View.VISIBLE;
+    }
+
+    private void checkBackgroundAnimation() {
+        if (isViewPresentToUser() && backgroundAnimationEnabled) {
+            startBackgroundAnimation();
+        } else {
+            stopBackgroundAnimation();
+        }
+    }
+
+    private void checkColorAnimation() {
+        if(isViewPresentToUser()) {
+            if(callingDrawableColorsAnimator != null && callingDrawableColorsAnimator.isRunning()) {
+                //do nothing
+            } else {
+                infinityAnimateColors(currentColors, currentColorIndex);
+            }
+        } else {
+            stopColorAnimation();
+        }
+    }
+
+    public void setEnabledBackgroundAnimation(boolean enabled) {
+        if (backgroundAnimationEnabled == enabled) {
+            return;
+        }
+        Log.d("VOIP_FRAGMENT", "Background animation enabled changed to " + enabled);
+        backgroundAnimationEnabled = enabled;
+        if (backgroundAnimationEnabled && isViewPresentToUser()) {
+            startBackgroundAnimation();
+            animateColorsTransition(currentColors, currentColorIndex, true);
+        } else {
+            stopBackgroundAnimation();
+            animateColorsTransition(currentMainColors, currentColorIndex, false);
+        }
+    }
+
+    private void animateColorsTransition(int[][] colors, int colorIndex) {
+        animateColorsTransition(colors, colorIndex, true);
+    }
+
+    private void animateColorsTransition(int[][] colors, int colorIndex, boolean runInfinity) {
+        stopColorAnimation();
+        final int[] currentColors = callingDrawable.getColors().clone();
+        callingDrawableColorsAnimator = ValueAnimator.ofFloat(0f, 1f);
+        callingDrawableColorsAnimator.setDuration(300);
+        callingDrawableColorsAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            int[] newColors = new int[currentColors.length];
+            for (int i = 0; i < currentColors.length; i++) {
+                newColors[i] = AndroidUtilities.getOffsetColor(currentColors[i], colors[colorIndex][i], progress, 1);
+            }
+            setColors(newColors);
+        });
+        callingDrawableColorsAnimator.addListener(new AnimatorListenerAdapter() {
+            boolean cancelled;
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                cancelled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if(!cancelled && runInfinity) {
+                    infinityAnimateColors(colors, colorIndex);
+                }
+            }
+        });
+        callingDrawableColorsAnimator.start();
+    }
+
+    private void infinityAnimateColors(int[][] colors, int startIndex) {
+        stopColorAnimation();
+        int cycleSize = colors.length - 1;
+        final long cycleTime = 8000L;
+        callingDrawableColorsAnimator = ValueAnimator.ofFloat(0f, (float) cycleSize);
+        callingDrawableColorsAnimator.setDuration(cycleSize * cycleTime);
+        callingDrawableColorsAnimator.setInterpolator(new LinearInterpolator());
+        callingDrawableColorsAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        callingDrawableColorsAnimator.setRepeatMode(ValueAnimator.RESTART);
+        callingDrawableColorsAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            int srcIndex = (int) progress;
+            float localProgress = progress - (int) progress;
+            if (srcIndex >= colors.length - 1) {
+                srcIndex = colors.length - 2;
+            }
+            int dstIndex = srcIndex + 1;
+            if (dstIndex == colors.length - 1) {
+                currentColorIndex = 0;
+            } else {
+                currentColorIndex = dstIndex;
+            }
+            int[] srcColors = colors[srcIndex];
+            int[] dstColors = colors[dstIndex];
+            int[] newColors = new int[srcColors.length];
+            for (int i = 0; i < srcColors.length; i++) {
+                newColors[i] = AndroidUtilities.getOffsetColor(srcColors[i], dstColors[i], localProgress, 1);
+            }
+            setColors(newColors);
+        });
+        callingDrawableColorsAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                callingDrawableColorsAnimator.setCurrentPlayTime(cycleTime * startIndex);
+            }
+        });
+        callingDrawableColorsAnimator.start();
+    }
+
+    private void stopColorAnimation() {
+        if (callingDrawableColorsAnimator != null) {
+            callingDrawableColorsAnimator.cancel();
+        }
+    }
+
+    private void startBackgroundAnimation() {
+        stopBackgroundAnimation();
+        callingDrawableAnimator = ValueAnimator.ofFloat(PHASES_COUNT, 0f);
+        callingDrawableAnimator.setDuration(DURATION);
+        callingDrawableAnimator.setInterpolator(new LinearInterpolator());
+        callingDrawableAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        callingDrawableAnimator.setRepeatMode(ValueAnimator.RESTART);
+        callingDrawableAnimator.addUpdateListener(valueAnimator -> {
+            playTime = valueAnimator.getCurrentPlayTime();
+            float progress = (float) valueAnimator.getAnimatedValue();
+            callingDrawable.setPosAnimationProgress(progress);
+            invalidate();
+        });
+        callingDrawableAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                callingDrawableAnimator.setCurrentPlayTime(playTime);
+            }
+        });
+        callingDrawableAnimator.start();
+    }
+
+    private void stopBackgroundAnimation() {
+        if (callingDrawableAnimator != null) {
+            callingDrawableAnimator.cancel();
+        }
+    }
+}
+
+class WaveAvatar extends BackupImageView {
+
+    private boolean startPulseAnimation = false;
+    private boolean stopPulseAnimation = false;
+    private boolean waveAnimationEnabled = true;
+    AvatarWavesDrawable avatarWavesDrawable;
+
+    private ValueAnimator fadeAnimator;
+    private ValueAnimator pulseAnimator;
+
+    private final float smallMinRadius = AndroidUtilities.dp(140) / 2f;
+    private final float smallMaxRadius = AndroidUtilities.dp(155) / 2f;
+    private final float bigMinRadius = AndroidUtilities.dp(155) / 2f;
+    private final float bigMaxRadius = AndroidUtilities.dp(176) / 2f;
+
+    public WaveAvatar(Context context) {
+        super(context);
+        avatarWavesDrawable = new AvatarWavesDrawable(
+                smallMinRadius,
+                smallMaxRadius,
+                bigMinRadius,
+                bigMaxRadius
+        );
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        float cx = getMeasuredWidth() / 2f;
+        float cy = getMeasuredHeight() / 2f;
+        avatarWavesDrawable.update();
+        avatarWavesDrawable.draw(canvas, cx, cy);
+        canvas.save();
+        super.onDraw(canvas);
+        canvas.restore();
+        if (!SharedConfig.getLiteMode().enabled() && waveAnimationEnabled) {
+            invalidate();
+        }
+    }
+
+    public void setAmplitude(double value) {
+        if (waveAnimationEnabled) {
+            avatarWavesDrawable.setAmplitude(value);
+            invalidate();
+        }
+    }
+
+    public void setWaveAnimationEnabled(boolean enabled, boolean animated) {
+        if (waveAnimationEnabled == enabled) {
+            return;
+        }
+        waveAnimationEnabled = enabled;
+        if(enabled) {
+            runStartAnimation();
+        } else {
+            avatarWavesDrawable.setAmplitude(0f);
+            if(animated) {
+                runStopAnimation();
+            } else {
+                setRadiusProgress(1f);
+            }
+        }
+    }
+
+    private void setRadiusProgress(float progress) {
+        avatarWavesDrawable.setRadius(
+                smallMinRadius + (smallMaxRadius - smallMinRadius) * progress,
+                smallMaxRadius,
+                bigMinRadius + (bigMaxRadius - bigMinRadius) * progress,
+                bigMaxRadius
+        );
+    }
+
+    private void runStopAnimation() {
+        cancelFadeAnimation();
+        fadeAnimator = ValueAnimator.ofFloat(0f, 1f);
+        fadeAnimator.setDuration(1_000);
+        fadeAnimator.setInterpolator(new LinearInterpolator());
+        fadeAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            setRadiusProgress(progress);
+            invalidate();
+        });
+        fadeAnimator.start();
+    }
+
+    private void runStartAnimation() {
+        cancelFadeAnimation();
+        fadeAnimator = ValueAnimator.ofFloat(1f, 0f);
+        fadeAnimator.setDuration(300);
+        fadeAnimator.setInterpolator(new LinearInterpolator());
+        fadeAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            setRadiusProgress(progress);
+            invalidate();
+        });
+        fadeAnimator.start();
+    }
+
+    private void cancelFadeAnimation() {
+        if(fadeAnimator != null) {
+            fadeAnimator.cancel();
+        }
+    }
+
+    public void startPulseAnimation() {
+        if (startPulseAnimation && isPulseAnimationRunning()) {
+            return;
+        }
+        cancelPulseAnimation();
+        startPulseAnimation = true;
+        final long duration = 1_000;
+        final float min = 0.9f;
+        final float max = 1.05f;
+        final float delta = max - min;
+        pulseAnimator = ValueAnimator.ofFloat(min, max);
+        pulseAnimator.setDuration(duration);
+        pulseAnimator.setInterpolator(CubicBezierInterpolator.EASE_BOTH);
+        pulseAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        pulseAnimator.setRepeatMode(ValueAnimator.REVERSE);
+        pulseAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            setScaleX(progress);
+            setScaleY(progress);
+            invalidate();
+        });
+        pulseAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                final float fraction = (getScaleX() - min) / delta;
+                pulseAnimator.setCurrentPlayTime((long) (duration * fraction));
+            }
+        });
+        pulseAnimator.start();
+    }
+
+    public void stopPulseAnimation() {
+        if(stopPulseAnimation && isPulseAnimationRunning()) {
+            return;
+        }
+        cancelPulseAnimation();
+        if (getScaleX() == 1) {
+            return;
+        }
+        stopPulseAnimation = true;
+        pulseAnimator = ValueAnimator.ofFloat(getScaleX(), 1f);
+        pulseAnimator.setDuration(300);
+        pulseAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        pulseAnimator.addUpdateListener(valueAnimator -> {
+            float progress = (float) valueAnimator.getAnimatedValue();
+            setScaleX(progress);
+            setScaleY(progress);
+            invalidate();
+        });
+        pulseAnimator.start();
+    }
+
+    public void cancelPulseAnimation() {
+        Log.d("VOIP_FRAGMENT", "Cancel pulse animation");
+        if(pulseAnimator != null) {
+            pulseAnimator.cancel();
+            startPulseAnimation = false;
+            stopPulseAnimation = false;
+        }
+    }
+
+    public boolean isPulseAnimationRunning() {
+        return pulseAnimator != null && pulseAnimator.isRunning();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        cancelFadeAnimation();
+        cancelPulseAnimation();
+        if (waveAnimationEnabled) {
+            setRadiusProgress(0f);
+        } else {
+            setRadiusProgress(1f);
+        }
+        setScaleX(1f);
+        setScaleY(1f);
+    }
+}
+
+class AvatarWavesDrawable {
+
+    float amplitude;
+    float animateToAmplitude;
+    float animateAmplitudeDiff;
+    private BlobDrawable smallBlobDrawable;
+    private BlobDrawable bigBlobDrawable;
+
+    public AvatarWavesDrawable(float smallMinRadius, float smallMaxRadius, float bigMinRadius, float bigMaxRadius) {
+        smallBlobDrawable = new BlobDrawable(6);
+        bigBlobDrawable = new BlobDrawable(8);
+        setRadius(smallMinRadius, smallMaxRadius, bigMinRadius, bigMaxRadius);
+        smallBlobDrawable.generateBlob();
+        bigBlobDrawable.generateBlob();
+        smallBlobDrawable.paint.setColor(Color.argb(36, 255, 255, 255));
+        bigBlobDrawable.paint.setColor(Color.argb(20, 255, 255, 255));
+    }
+
+    public void setRadius(float smallMinRadius, float smallMaxRadius, float bigMinRadius, float bigMaxRadius) {
+        smallBlobDrawable.setRadius(smallMinRadius, smallMaxRadius);
+        bigBlobDrawable.setRadius(bigMinRadius, bigMaxRadius);
+    }
+
+    public void update() {
+        if (animateToAmplitude != amplitude) {
+            amplitude += animateAmplitudeDiff * 16;
+            if (animateAmplitudeDiff > 0) {
+                if (amplitude > animateToAmplitude) {
+                    amplitude = animateToAmplitude;
+                }
+            } else {
+                if (amplitude < animateToAmplitude) {
+                    amplitude = animateToAmplitude;
+                }
+            }
+        }
+    }
+
+    public void draw(Canvas canvas, float cx, float cy) {
+        if (SharedConfig.getLiteMode().enabled()) {
+            return;
+        }
+        //we need scale from 1 to 1.2 in final
+        //float scaleBlob = 0.8f + 0.4f * amplitude;
+        float scaleBlob = 1f + 0.1f * amplitude;
+        canvas.save();
+        canvas.scale(scaleBlob, scaleBlob, cx, cy);
+        smallBlobDrawable.update(amplitude, 1f);
+        smallBlobDrawable.draw(cx, cy, canvas, smallBlobDrawable.paint);
+        canvas.restore();
+
+        scaleBlob = 1f + 0.15f * amplitude;
+        canvas.save();
+        canvas.scale(scaleBlob, scaleBlob, cx, cy);
+        bigBlobDrawable.update(amplitude, 1f);
+        bigBlobDrawable.draw(cx, cy, canvas, bigBlobDrawable.paint);
+        canvas.restore();
+    }
+
+    public float getAvatarScale() {
+        return 1f + 0.2f * amplitude;
+    }
+
+    public void setAmplitude(double value) {
+        float amplitude = (float) value;
+        if (amplitude > 1f) {
+            amplitude = 1f;
+        } else if (amplitude < 0) {
+            amplitude = 0;
+        }
+        animateToAmplitude = amplitude;
+        animateAmplitudeDiff = (animateToAmplitude - this.amplitude) / 200;
+    }
+}
+
+class IdleDetectorFrameLayout extends FrameLayout {
+
+    IdleChangeListener listener;
+    boolean isIdle;
+    private int state = -1;
+
+    private final Runnable idleRunnable = () -> {
+        if (state == VoIPService.STATE_ESTABLISHED) {
+            setIdle(true);
+        }
+    };
+
+    public IdleDetectorFrameLayout(@NonNull Context context) {
+        super(context);
+    }
+
+    void setState(int state) {
+        if (this.state == state) {
+            return;
+        }
+        this.state = state;
+        if (state != VoIPService.STATE_ESTABLISHED) {
+            setIdle(false);
+        } else {
+            checkAndSchedule();
+        }
+    }
+
+    void setIdle(boolean idle) {
+        if (isIdle == idle) {
+            return;
+        }
+        isIdle = idle;
+        if (listener != null) {
+            listener.onIdleChanged(idle);
+        }
+        Log.d("VOIP_FRAGMENT", "Idle changed to " + isIdle);
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        setIdle(false);
+        checkAndSchedule();
+        return super.onInterceptTouchEvent(ev);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        removeCallbacks(idleRunnable);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        setIdle(false);
+        checkAndSchedule();
+    }
+
+    private void checkAndSchedule() {
+        removeCallbacks(idleRunnable);
+        if (state == VoIPService.STATE_ESTABLISHED) {
+            postDelayed(idleRunnable, 10_000);
+            Log.d("VOIP_FRAGMENT", "Schedule idle");
+        }
+    }
+
+    interface IdleChangeListener {
+        void onIdleChanged(boolean isIdle);
     }
 }
