@@ -266,6 +266,7 @@ public class EmojiAnimationsOverlay implements NotificationCenter.NotificationCe
     }
 
     public void draw(Canvas canvas) {
+        //TODO YL some info
         if (!drawingObjects.isEmpty()) {
             for (int i = 0; i < drawingObjects.size(); i++) {
                 DrawingObject drawingObject = drawingObjects.get(i);
