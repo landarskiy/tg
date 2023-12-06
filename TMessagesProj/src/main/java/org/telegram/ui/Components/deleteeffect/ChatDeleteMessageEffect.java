@@ -95,7 +95,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        debugPaint(canvas);
+        //debugPaint(canvas);
     }
 
     private void debugPaint(Canvas canvas) {
@@ -117,16 +117,21 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         Rect bounds = new Rect();
         Bitmap viewBitmap = null;
         long startTile = System.nanoTime();
+        int[] displayLocation = new int[2];
+        int[] viewLocation = new int[2];
+        getLocationOnScreen(displayLocation);
         for (int i = 0; i < Math.min(disappearedChildren.size(), 1); i++) {
             View childrenView = disappearedChildren.get(i);
             if (!(childrenView instanceof ChatMessageCell)) {
                 continue;
             }
+            childrenView.getLocationOnScreen(viewLocation);
+            int y = viewLocation[1] - displayLocation[1];
             ChatMessageCell cell = (ChatMessageCell) childrenView;
             int left = (cell.getLeft() + cell.getBackgroundDrawableLeft());
             int right = (cell.getLeft() + cell.getBackgroundDrawableRight());
-            int top = (cell.getTop() + cell.getBackgroundDrawableTop()) - topDiff;
-            int bottom = (cell.getTop() + cell.getBackgroundDrawableBottom()) - topDiff;
+            int top = (y + cell.getBackgroundDrawableTop()) - topDiff;
+            int bottom = (y + cell.getBackgroundDrawableBottom()) - topDiff;
             bounds.set(left, top, right, bottom);
             viewBitmap = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(viewBitmap);
