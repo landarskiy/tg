@@ -306,6 +306,7 @@ import org.telegram.ui.Components.UndoView;
 import org.telegram.ui.Components.UnreadCounterTextView;
 import org.telegram.ui.Components.ViewHelper;
 import org.telegram.ui.Components.deleteeffect.ChatDeleteMessageEffect;
+import org.telegram.ui.Components.deleteeffect.TestEffect;
 import org.telegram.ui.Components.spoilers.SpoilerEffect;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Components.voip.VoIPHelper;
@@ -5730,11 +5731,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
         contentView.addView(chatListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        selectionReactionsOverlay = new ChatSelectionReactionMenuOverlay(this, context);
-        contentView.addView(selectionReactionsOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
         chatDeleteMessageEffect = new ChatDeleteMessageEffect(context);
         contentView.addView(chatDeleteMessageEffect, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        selectionReactionsOverlay = new ChatSelectionReactionMenuOverlay(this, context);
+        contentView.addView(selectionReactionsOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         animatingImageView = new ClippingImageView(context);
         animatingImageView.setVisibility(View.GONE);
@@ -9193,7 +9194,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
 
                 chatListView.setPadding(0, p, 0, AndroidUtilities.dp(3) + blurredViewBottomOffset);
-                chatDeleteMessageEffect.setPadding(0, p, 0, AndroidUtilities.dp(3) + blurredViewBottomOffset);
+                //chatDeleteMessageEffect.setPadding(0, p, 0, AndroidUtilities.dp(3) + blurredViewBottomOffset);
 
                 if (scrollToMessageObject != null) {
                     chatAdapter.updateRowsSafe();
@@ -14664,7 +14665,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     if (keyboardSize > AndroidUtilities.dp(20) && getLayoutParams().height < 0) {
                         childTop -= keyboardSize;
                     }
-                } else if (child == instantCameraView || child == overlayView || child == animatingImageView) {
+                } else if (child == instantCameraView || child == overlayView || child == animatingImageView || child == chatDeleteMessageEffect) {
                     childTop = 0;
                 } else if (child == textSelectionHelper.getOverlayView(getContext())) {
                     childTop -= paddingBottom;
