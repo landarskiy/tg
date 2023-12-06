@@ -22,6 +22,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
+import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Components.RLottieDrawable;
 
 import java.nio.ByteBuffer;
@@ -118,14 +119,19 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         long startTile = System.nanoTime();
         for (int i = 0; i < Math.min(disappearedChildren.size(), 1); i++) {
             View childrenView = disappearedChildren.get(i);
-            int childTop = childrenView.getTop() - topDiff;
-            int childLeft = childrenView.getLeft();
-            int childRight = childLeft + childrenView.getMeasuredWidth();
-            int childBottom = childTop + childrenView.getMeasuredHeight();
-            viewBitmap = Bitmap.createBitmap(childrenView.getMeasuredWidth(), childrenView.getMeasuredHeight(), Bitmap.Config.ARGB_8888);
+            if (!(childrenView instanceof ChatMessageCell)) {
+                continue;
+            }
+            ChatMessageCell cell = (ChatMessageCell) childrenView;
+            int left = (cell.getLeft() + cell.getBackgroundDrawableLeft());
+            int right = (cell.getLeft() + cell.getBackgroundDrawableRight());
+            int top = (cell.getTop() + cell.getBackgroundDrawableTop()) - topDiff;
+            int bottom = (cell.getTop() + cell.getBackgroundDrawableBottom()) - topDiff;
+            bounds.set(left, top, right, bottom);
+            viewBitmap = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(viewBitmap);
+            c.translate(-left, 0);
             childrenView.draw(c);
-            bounds.set(childLeft, childTop, childRight, childBottom);
         }
         if (renderThread == null) {
             return;
@@ -152,7 +158,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private int textureId;
         private Rect textureBoundsPx = new Rect();
         private double progress = 0.0;
-        private long effectTime = 1 * 1000;
+        private long effectTime = 5 * 1000;
         private long startTime;
 
         private boolean updateProgress() {
