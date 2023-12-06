@@ -131,7 +131,15 @@ public class ChatDeleteMessageEffect extends FrameLayout {
             viewBitmap = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(viewBitmap);
             c.translate(-left, 0);
-            childrenView.draw(c);
+            cell.drawForBlur = true;
+            if (cell.drawBackgroundInParent()) {
+                cell.drawBackgroundInternal(c, true);
+            }
+            cell.draw(c);
+            if (cell.hasOutboundsContent()) {
+                cell.drawOutboundsContent(c);
+            }
+            cell.drawForBlur = false;
         }
         if (renderThread == null) {
             return;
