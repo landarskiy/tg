@@ -277,6 +277,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private EGLConfig eglConfig;
         private EGLSurface eglSurface;
         private EGLContext eglContext;
+        private int maxParticlesPerCall;
 
         private int sldTextureHandle;
         private int sldTexturePositionHandle;
@@ -288,6 +289,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private int ptcParticleRadiusHandle;
         private int ptcMinOffsetHandle;
         private int ptcMaxOffsetHandle;
+        private int ptcMaxHorizontalOffsetHandle;
         private int ptcProgressHandle;
         // vec2
         private int ptcScreenSizeHandle;
@@ -321,6 +323,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         float particleR;
         float minOffset;
         float maxOffset;
+        float maxHorizontalOffset;
         private int currentBuffer = 0;
         private int[] particlesData;
         private int[] vertexBufferId;
@@ -331,7 +334,8 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private void init() {
             particleR = getParticleSize();
             minOffset = px(16f);
-            maxOffset = px(64f);
+            maxOffset = px(164f);
+            maxHorizontalOffset = px(64f);
             egl = (EGL10) EGLContext.getEGL();
 
             eglDisplay = egl.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
@@ -388,6 +392,10 @@ public class ChatDeleteMessageEffect extends FrameLayout {
                 return;
             }
 
+            int[] maxCount = new int[1];
+            GLES31.glGetIntegerv(GLES31.GL_MAX_ELEMENTS_VERTICES, maxCount, 0);
+            maxParticlesPerCall = Math.max(1000, maxCount[0] - 1);
+
             GLES31.glEnable(GLES31.GL_BLEND);
             GLES31.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
             GLES31.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -428,7 +436,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
 
             genParticlesData();
 
-            String[] feedbackVaryings = {"outPosition", "outTextCoord", "outTargetOffset"};
+            String[] feedbackVaryings = {"outPosition", "outTextCoord", "outTargetOffset", "outTargetHorizontalOffset"};
             GLES31.glTransformFeedbackVaryings(drawParticlesProgram, feedbackVaryings, GLES31.GL_INTERLEAVED_ATTRIBS);
 
             int[] status = new int[1];
@@ -449,6 +457,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
             ptcParticleRadiusHandle = GLES20.glGetUniformLocation(drawParticlesProgram, "uParticleRadius");
             ptcMinOffsetHandle = GLES20.glGetUniformLocation(drawParticlesProgram, "uMinOffset");
             ptcMaxOffsetHandle = GLES20.glGetUniformLocation(drawParticlesProgram, "uMaxOffset");
+            ptcMaxHorizontalOffsetHandle = GLES20.glGetUniformLocation(drawParticlesProgram, "uMaxHorizontalOffset");
             ptcInitHandle = GLES20.glGetUniformLocation(drawParticlesProgram, "uInit");
             return true;
         }
@@ -545,18 +554,21 @@ public class ChatDeleteMessageEffect extends FrameLayout {
 
             GLES20.glUniform1f(ptcMinOffsetHandle, minOffset);
             GLES20.glUniform1f(ptcMaxOffsetHandle, maxOffset);
+            GLES20.glUniform1f(ptcMaxHorizontalOffsetHandle, maxHorizontalOffset);
 
             GLES31.glBindBuffer(GLES31.GL_ARRAY_BUFFER, particlesData[currentBuffer]);
             int floatSize = 4;
             int vec2Size = floatSize * 2;
             //vec2 + vec2 = 4 * 2 + 4 * 2 = 8 + 8 = 16
-            int stride = vec2Size + vec2Size + vec2Size;
+            int stride = vec2Size + vec2Size + vec2Size + vec2Size;
             GLES31.glVertexAttribPointer(0, 2, GLES31.GL_FLOAT, false, stride, 0); // Position (vec2)
             GLES31.glEnableVertexAttribArray(0);
             GLES31.glVertexAttribPointer(1, 2, GLES31.GL_FLOAT, false, stride, 8); // Texture position (vec2)
             GLES31.glEnableVertexAttribArray(1);
             GLES31.glVertexAttribPointer(2, 2, GLES31.GL_FLOAT, false, stride, 16); // Texture position (vec2)
             GLES31.glEnableVertexAttribArray(2);
+            GLES31.glVertexAttribPointer(3, 2, GLES31.GL_FLOAT, false, stride, 24); // Texture position (vec2)
+            GLES31.glEnableVertexAttribArray(3);
             GLES31.glBindBufferBase(GLES31.GL_TRANSFORM_FEEDBACK_BUFFER, 0, particlesData[1 - currentBuffer]);
             GLES31.glVertexAttribPointer(0, 2, GLES31.GL_FLOAT, false, stride, 0); // Position (vec2)
             GLES31.glEnableVertexAttribArray(0);
@@ -564,9 +576,17 @@ public class ChatDeleteMessageEffect extends FrameLayout {
             GLES31.glEnableVertexAttribArray(1);
             GLES31.glVertexAttribPointer(2, 2, GLES31.GL_FLOAT, false, stride, 16); // Texture position (vec2)
             GLES31.glEnableVertexAttribArray(2);
+            GLES31.glVertexAttribPointer(3, 2, GLES31.GL_FLOAT, false, stride, 24); // Texture position (vec2)
+            GLES31.glEnableVertexAttribArray(3);
 
             GLES31.glBeginTransformFeedback(GLES31.GL_POINTS);
-            GLES31.glDrawArrays(GLES31.GL_POINTS, 0, particlesCount);
+            int loopCount = particlesCount / maxParticlesPerCall;
+            for (int i = 0; i < loopCount; i++) {
+                GLES31.glDrawArrays(GLES31.GL_POINTS, i * maxParticlesPerCall, maxParticlesPerCall);
+            }
+            if (particlesCount % maxParticlesPerCall != 0) {
+                GLES31.glDrawArrays(GLES31.GL_POINTS, loopCount * maxParticlesPerCall, particlesCount % maxParticlesPerCall);
+            }
             GLES31.glEndTransformFeedback();
 
             checkGlErrors();
@@ -690,7 +710,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
                 //4 = float size
                 int floatSize = 4;
                 //vec2 + vec2 + vec2 = 2 + 2 + 2 = 4
-                int dataCount = 2 + 2 + 2;
+                int dataCount = 2 + 2 + 2 + 2;
                 GLES31.glBufferData(GLES31.GL_ARRAY_BUFFER, this.particlesCount * dataCount * floatSize, null, GLES31.GL_DYNAMIC_DRAW);
             }
             checkGlErrors();

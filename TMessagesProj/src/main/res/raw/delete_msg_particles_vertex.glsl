@@ -5,10 +5,12 @@ precision highp float;
 layout (location = 0) in vec2 inPosition;
 layout (location = 1) in vec2 inTextCoord;
 layout (location = 2) in vec2 inTargetOffset;
+layout (location = 3) in vec2 inTargetHorizontalOffset;
 
 out vec2 outPosition;
 out vec2 outTextCoord;
 out vec2 outTargetOffset;
+out vec2 outTargetHorizontalOffset;
 
 out vec2 vTexCoord;
 out float vAlpha;
@@ -17,6 +19,7 @@ uniform int uParticlesCount;
 uniform float uParticleRadius;
 uniform float uMinOffset;
 uniform float uMaxOffset;
+uniform float uMaxHorizontalOffset;
 //x - width, y - height
 uniform vec2 uScreenSizePx;
 //x - left, y - top, z - right, w - bottom
@@ -65,6 +68,7 @@ void main(void) {
     vec2 position = inPosition;
     vec2 textCoord = inTextCoord;
     vec2 targetOffset = inTargetOffset;
+    vec2 targetHorizontalOffset = inTargetHorizontalOffset;
 
     //1008
     int particlesBoundsWidthPx = int(uParticleBoundsPx.z - uParticleBoundsPx.x);
@@ -91,18 +95,22 @@ void main(void) {
         textCoord = vec2(float(localXPx) / float(particlesBoundsWidthPx), 1. - float(localYPx) / float(particlesBoundsHeightPx));
         float targetXOffset = float(localXPx) / float(particlesBoundsWidthPx);
         float extraYOffset = (uMaxOffset - uMinOffset) * (1. - float(localYPx) / float(particlesBoundsHeightPx));
-        extraYOffset = extraYOffset * rand(vec2(localXPx, localYPx));
+        float yOffsetRand = rand(vec2(float(localXPx) / float(localYPx + 1), - float(localYPx) / float(localXPx + 1)));
+        extraYOffset = extraYOffset * yOffsetRand;
         float targetYOffset = uMinOffset + extraYOffset;
         targetOffset = vec2(targetXOffset, targetYOffset);
+        float targetHorizontalOffsetRand = randNeg(vec2(-float(localXPx) / float(localYPx + 1), float(localYPx) / float(localXPx + 1)));
+        targetHorizontalOffset.x = toGlWidth(uMaxHorizontalOffset) * targetHorizontalOffsetRand;
     }
     // visible | invisible
     float displayProgress = min(1., uProgress * 2.);
     // movind up
     float offsetProgress = min(1., uProgress * 1.) - targetOffset.x / 2.;
+    offsetProgress = exp(offsetProgress) - 1.;
 
     vec4 glParticleBounds = toGlBounds(uParticleBoundsPx);
     float yOffset = toGlHeight(targetOffset.y);
-    float xOffset = toGlWidth(2. * randNeg(vec2(uProgress, yOffset) / uScreenSizePx.x));
+    float xOffset = targetHorizontalOffset.x * offsetProgress;
 
     float displayBorderX = glParticleBounds.x + (glParticleBounds.z - glParticleBounds.x) * displayProgress;
     vec4 displayPosition = vec4(position.x + xOffset, position.y + yOffset * offsetProgress, 0.0, 1.0);
@@ -110,6 +118,7 @@ void main(void) {
     outPosition = position;
     outTextCoord = textCoord;
     outTargetOffset = targetOffset;
+    outTargetHorizontalOffset = targetHorizontalOffset;
 
     gl_Position = displayPosition;
     vTexCoord = textCoord;
