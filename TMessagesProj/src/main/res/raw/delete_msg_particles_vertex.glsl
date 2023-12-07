@@ -86,12 +86,12 @@ void main(void) {
         vec2 glTopLeft = toGlPosition(uParticleBoundsPx.xy);
         vec2 glTopLeftOffset = toGlSize(vec2(localXPx, localYPx));
         //add some horizontal dispersion
-        glTopLeftOffset.x = glTopLeftOffset.x + rand(vec2(gl_VertexID, localYPx)) * toGlWidth(float(max(spaceBetweenPoints, 3)));
+        glTopLeftOffset.x = glTopLeftOffset.x + rand(vec2(localXPx, localYPx)) * toGlWidth(float(max(spaceBetweenPoints, 3)));
         position = glTopLeft + vec2(glTopLeftOffset.x, -glTopLeftOffset.y);
         textCoord = vec2(float(localXPx) / float(particlesBoundsWidthPx), 1. - float(localYPx) / float(particlesBoundsHeightPx));
         float targetXOffset = float(localXPx) / float(particlesBoundsWidthPx);
         float extraYOffset = (uMaxOffset - uMinOffset) * (1. - float(localYPx) / float(particlesBoundsHeightPx));
-        extraYOffset = extraYOffset * rand(vec2(gl_VertexID, localYPx));
+        extraYOffset = extraYOffset * rand(vec2(localXPx, localYPx));
         float targetYOffset = uMinOffset + extraYOffset;
         targetOffset = vec2(targetXOffset, targetYOffset);
     }
