@@ -90,7 +90,9 @@ void main(void) {
         position = glTopLeft + vec2(glTopLeftOffset.x, -glTopLeftOffset.y);
         textCoord = vec2(float(localXPx) / float(particlesBoundsWidthPx), 1. - float(localYPx) / float(particlesBoundsHeightPx));
         float targetXOffset = float(localXPx) / float(particlesBoundsWidthPx);
-        float targetYOffset = uMinOffset + (uMaxOffset - uMinOffset) * (1. - float(localYPx) / float(particlesBoundsHeightPx));
+        float extraYOffset = (uMaxOffset - uMinOffset) * (1. - float(localYPx) / float(particlesBoundsHeightPx));
+        extraYOffset = extraYOffset * rand(vec2(gl_VertexID, localYPx));
+        float targetYOffset = uMinOffset + extraYOffset;
         targetOffset = vec2(targetXOffset, targetYOffset);
     }
     // visible | invisible

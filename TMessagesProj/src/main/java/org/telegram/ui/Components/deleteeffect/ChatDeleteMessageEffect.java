@@ -22,6 +22,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Components.RLottieDrawable;
 
@@ -171,7 +172,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private int textureId;
         private Rect textureBoundsPx = new Rect();
         private double progress = 0.0;
-        private long effectTime = 5 * 1000;
+        private long effectTime = 2 * 1000;
         private long startTime;
 
         private boolean updateProgress() {
@@ -201,7 +202,27 @@ public class ChatDeleteMessageEffect extends FrameLayout {
         private int getParticlesCount(Rect bounds) {
             int square = bounds.width() * bounds.height();
             //optimal count is 6000 for 1008x288=290304
-            return (int) (3000f * square / 290304f);
+            switch (SharedConfig.getDevicePerformanceClass()) {
+                case SharedConfig.PERFORMANCE_CLASS_HIGH:
+                    return (int) (10000f * square / 290304f);
+                case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
+                    return (int) (7000f * square / 290304f);
+                default:
+                case SharedConfig.PERFORMANCE_CLASS_LOW:
+                    return (int) (3000f * square / 290304f);
+            }
+        }
+
+        private float getParticleSize() {
+            switch (SharedConfig.getDevicePerformanceClass()) {
+                case SharedConfig.PERFORMANCE_CLASS_HIGH:
+                    return px(1.5f);
+                case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
+                    return px(1.6f);
+                default:
+                case SharedConfig.PERFORMANCE_CLASS_LOW:
+                    return px(2f);
+            }
         }
 
         public void updateTexture(Bitmap bitmap, Rect bounds) {
@@ -308,7 +329,7 @@ public class ChatDeleteMessageEffect extends FrameLayout {
 
 
         private void init() {
-            particleR = px(2f);
+            particleR = getParticleSize();
             minOffset = px(16f);
             maxOffset = px(64f);
             egl = (EGL10) EGLContext.getEGL();

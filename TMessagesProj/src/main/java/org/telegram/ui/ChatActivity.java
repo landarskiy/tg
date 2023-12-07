@@ -306,7 +306,6 @@ import org.telegram.ui.Components.UndoView;
 import org.telegram.ui.Components.UnreadCounterTextView;
 import org.telegram.ui.Components.ViewHelper;
 import org.telegram.ui.Components.deleteeffect.ChatDeleteMessageEffect;
-import org.telegram.ui.Components.deleteeffect.TestEffect;
 import org.telegram.ui.Components.spoilers.SpoilerEffect;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Components.voip.VoIPHelper;
