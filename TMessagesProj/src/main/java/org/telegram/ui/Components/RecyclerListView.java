@@ -2801,7 +2801,7 @@ public class RecyclerListView extends RecyclerView {
     }
 
     public void startFastForward() {
-        requestDisallowInterceptTouchEvent(this, false);
+        requestDisallowInterceptTouchEvent(this, true);
         this.fastForwardGesture = true;
     }
 
