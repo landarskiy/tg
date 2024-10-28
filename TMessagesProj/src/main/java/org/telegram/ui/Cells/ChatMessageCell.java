@@ -558,6 +558,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         default void didPressSideButton(ChatMessageCell cell) {
         }
 
+        default boolean didLongPressSideButton(ChatMessageCell cell, float x, float y) { return false; }
+
+        default boolean didLongPressSideButtonCancelled() { return false; }
+
         default void didPressOther(ChatMessageCell cell, float otherX, float otherY) {
         }
 
@@ -3877,6 +3881,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
         }
 
+        if(checkFastForward(event)) {
+            return true;
+        }
+
         if (checkTextSelection(event)) {
             return true;
         }
@@ -4396,6 +4404,14 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             return false;
         }
         return pinchToZoomHelper.checkPinchToZoom(ev, this, photoImage, null, null, currentMessageObject, mediaSpoilerEffect2 == null ? 0 : mediaSpoilerEffect2.getAttachIndex(this));
+    }
+
+    private boolean checkFastForward(MotionEvent event) {
+        if (delegate == null) return false;
+        if (event.getAction() != MotionEvent.ACTION_UP) {
+            return false;
+        }
+        return delegate.didLongPressSideButtonCancelled();
     }
 
     private boolean checkTextSelection(MotionEvent event) {
@@ -10025,6 +10041,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             invalidate();
         }
 
+        boolean checkSideButton = sideButtonPressed;
         linkPreviewPressed = false;
         sideButtonPressed = false;
         pressedSideButton = 0;
@@ -10078,6 +10095,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                         id = 0;
                     }
                     handled = delegate.didLongPressChannelAvatar(this, currentChat, id, lastTouchX, lastTouchY);
+                }
+            } else if (checkSideButton) {
+                if (delegate.didLongPressSideButton(this, sideStartX, sideStartY)) {
+                    return false;
                 }
             }
 

@@ -59,6 +59,7 @@ public class LinkActionView extends LinearLayout {
     String link;
     BaseFragment fragment;
     ImageView optionsView;
+    ImageView qrView;
     private final TextView copyView;
     private final TextView shareView;
     private final TextView removeView;
@@ -97,9 +98,19 @@ public class LinkActionView extends LinearLayout {
         frameLayout.addView(linkView);
         optionsView = new ImageView(context);
         optionsView.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.ic_ab_other));
+        optionsView.setBackground(Theme.createSelectorDrawable(fragment.getThemedColor(Theme.key_listSelector)));
         optionsView.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
         optionsView.setScaleType(ImageView.ScaleType.CENTER);
         frameLayout.addView(optionsView, LayoutHelper.createFrame(40, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+
+        qrView = new ImageView(context);
+        qrView.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.msg_qrcode));
+        qrView.setBackground(Theme.createSelectorDrawable(fragment.getThemedColor(Theme.key_listSelector)));
+        qrView.setContentDescription(LocaleController.getString(R.string.GetQRCode));
+        qrView.setScaleType(ImageView.ScaleType.CENTER);
+        qrView.setVisibility(GONE);
+        frameLayout.addView(qrView, LayoutHelper.createFrame(48, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+
         addView(frameLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, containerPadding, 0, containerPadding, 0));
 
         LinearLayout linearLayout = new LinearLayout(context);
@@ -343,6 +354,8 @@ public class LinkActionView extends LinearLayout {
 
         });
 
+        qrView.setOnClickListener(v -> showQrCode());
+
         frameLayout.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -412,6 +425,7 @@ public class LinkActionView extends LinearLayout {
         frameLayout.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(8), Theme.getColor(Theme.key_graySection), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_listSelector), (int) (255 * 0.3f))));
         linkView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         optionsView.setColorFilter(Theme.getColor(Theme.key_dialogTextGray3));
+        qrView.setColorFilter(Theme.getColor(Theme.key_dialogTextGray3));
         //optionsView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 1));
         avatarsContainer.countTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText));
         avatarsContainer.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(6), 0, ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText), (int) (255 * 0.3f))));
@@ -450,6 +464,10 @@ public class LinkActionView extends LinearLayout {
 
     public void showOptions(boolean b) {
         optionsView.setVisibility(b ? View.VISIBLE : View.GONE);
+    }
+
+    public void showQr(boolean b) {
+        qrView.setVisibility(b ? View.VISIBLE : View.GONE);
     }
 
     public void hideRevokeOption(boolean b) {

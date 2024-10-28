@@ -222,7 +222,6 @@ import org.telegram.ui.Cells.MentionCell;
 import org.telegram.ui.Cells.ProfileChannelCell;
 import org.telegram.ui.Cells.ShareDialogCell;
 import org.telegram.ui.Cells.StickerCell;
-import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextSelectionHelper;
 import org.telegram.ui.Components.*;
 import org.telegram.ui.Components.FloatingDebug.FloatingDebugController;
@@ -408,6 +407,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private HintView2 groupEmojiPackHint;
     private HintView2 botMessageHint;
     private HintView2 factCheckHint;
+    private HintView2 tapToUseBotHintView;
 
     private int reactionsMentionCount;
     private FrameLayout reactionsMentiondownButton;
@@ -1006,6 +1006,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private TLRPC.TL_channels_sendAsPeers sendAsPeersObj;
 
     private TLRPC.TL_account_resolvedBusinessChatLinks resolvedChatLink;
+
+    private FastForwardView fastForwardView;
 
     private boolean switchFromTopics;
     private boolean switchingFromTopics;
@@ -3282,8 +3284,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         timerHintView = null;
         videoPlayerContainer = null;
         voiceHintTextView = null;
+        tapToUseBotHintView = null;
         blurredView = null;
         dummyMessageCell = null;
+        fastForwardView = null;
         cantDeleteMessagesCount = 0;
         canEditMessagesCount = 0;
         cantForwardMessagesCount = 0;
@@ -5702,6 +5706,18 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
 
             @Override
+            public boolean consumeFastForward(MotionEvent e) {
+                if (fastForwardView == null) {
+                    return false;
+                }
+                float yOffset = getTop() - fastForwardView.getTop();
+                e.offsetLocation(0f, yOffset);
+                boolean result = fastForwardView.onTouchEvent(e);
+                e.offsetLocation(0f, -yOffset);
+                return result;
+            }
+
+            @Override
             public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
                 if (currentEncryptedChat != null) {
                     return;
@@ -7912,6 +7928,16 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 ViewGroup.LayoutParams params = bottomOverlayChat.getLayoutParams();
                 params.height = AndroidUtilities.dp(visibility == VISIBLE ? 51 + 8 * 2 : 51);
             }
+
+            @Override
+            protected void onVisibilityChanged(View changedView, int visibility) {
+                super.onVisibilityChanged(changedView, visibility);
+                if (bottomOverlayStartButton == null) {
+                    showTapToStartBotHint(true);
+                } else {
+                    showTapToStartBotHint(visibility != VISIBLE || bottomOverlayStartButton.getVisibility() != VISIBLE);
+                }
+            }
         };
         bottomOverlayStartButton.setBackground(Theme.AdaptiveRipple.filledRect(getThemedColor(Theme.key_featuredStickers_addButton), 8));
         bottomOverlayStartButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
@@ -8432,6 +8458,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             messagesSearchListContainer.setTag(1);
             searchExpandList.setText(LocaleController.getString(R.string.SearchAsChat), false);
             updateSearchListEmptyView();
+        }
+
+        if (chatMode == MODE_DEFAULT) {
+            prepareFastForwardView();
         }
 
         Timer.finish(t);
@@ -12158,6 +12188,89 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         }
 
         voiceHintTextView.showForView(chatActivityEnterView.getAudioVideoButtonContainer(), true);
+    }
+
+    private void showTapToStartBotHint(boolean hide) {
+        if (getParentActivity() == null || fragmentView == null || hide && tapToUseBotHintView == null || chatMode != 0 || chatActivityEnterView == null || chatActivityEnterView.getAudioVideoButtonContainer() == null || chatActivityEnterView.getAudioVideoButtonContainer().getVisibility() != View.VISIBLE || isInPreviewMode()) {
+            return;
+        }
+        if (tapToUseBotHintView == null) {
+            tapToUseBotHintView = new HintView2(getContext(), HintView2.DIRECTION_BOTTOM)
+                    .setMultilineText(false)
+                    .setTextAlign(Layout.Alignment.ALIGN_CENTER)
+                    .setDuration(-1)
+                    .setHideByTouch(true)
+                    .useScale(true)
+                    .setRounding(8);
+            Drawable drawable = ContextCompat.getDrawable(getContext(), R.drawable.hint_arrow_double_down).mutate();
+            DrawableCompat.setTint(drawable, 0xffffffff);
+            drawable.setBounds(0, 0, dp(14), dp(14));
+
+            tapToUseBotHintView.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.TapHereBot)));
+            tapToUseBotHintView.setMaxWidthPx(HintView2.cutInFancyHalf(tapToUseBotHintView.getText(), tapToUseBotHintView.getTextPaint()));
+            tapToUseBotHintView.setIcon(drawable);
+            contentView.addView(tapToUseBotHintView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 120, Gravity.TOP | Gravity.FILL_HORIZONTAL, 16, 0, 16, 0));
+        }
+        contentView.post(() -> {
+            if (contentView == null || tapToUseBotHintView == null) {
+                return;
+            }
+            if (hide) {
+                tapToUseBotHintView.hide(true);
+            } else {
+                int[] loc = new int[2];
+                View target = bottomOverlayChat;
+                if (target != null) {
+                    target.getLocationInWindow(loc);
+                    tapToUseBotHintView.setTranslationY(loc[1] - tapToUseBotHintView.getTop() - dp(120) - dp(8));
+                    tapToUseBotHintView.setJointPx(0.5f, 0);
+                }
+                tapToUseBotHintView.show();
+            }
+        });
+    }
+
+    private void prepareFastForwardView() {
+        if (getParentActivity() == null || fragmentView == null || contentView == null) {
+            return;
+        }
+        if (fastForwardView == null) {
+            ChatActivity parentFragment = this;
+            fastForwardView = new FastForwardView(getContext(), resourceProvider) {
+                @Override
+                public void onMessageSent(int result, MessageObject messageObject, TLRPC.Dialog dialog) {
+                    super.onMessageSent(result, messageObject, dialog);
+                    AlertsCreator.showSendMediaAlert(result, parentFragment, null);
+                    createUndoView();
+                    if (undoView == null) {
+                        return;
+                    }
+                    if (dialog.id != getUserConfig().getClientUserId() || !BulletinFactory.of(ChatActivity.this).showForwardedBulletinWithTag(dialog.id, 1)) {
+                        undoView.showWithAction(dialog.id, UndoView.ACTION_FWD_MESSAGES, 1, null, null, null);
+                        RLottieImageView targetIcon = undoView.getLeftImageView();
+                        targetIcon.post(() -> {
+                            targetIcon.setProgress(0);
+                            targetIcon.stopAnimation();
+                            int[] leftImgLoc = new int[2];
+                            targetIcon.getLocationInWindow(leftImgLoc);
+                            int[] fastFwdLoc = new int[2];
+                            fastForwardView.getLocationInWindow(fastFwdLoc);
+                            float outCx = leftImgLoc[0] - fastFwdLoc[0] + targetIcon.getMeasuredWidth() / 2f;
+                            float outCy = leftImgLoc[1] - fastFwdLoc[1] + targetIcon.getMeasuredHeight() / 2f - undoView.getEnterOffset();
+                            leftImgLoc[1] -= fastFwdLoc[1];
+                            collapse(outCx, outCy);
+                        });
+                        targetIcon.postDelayed(targetIcon::playAnimation, 300);
+                    }
+                }
+            };
+            contentView.addView(fastForwardView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        }
+    }
+
+    private void showFastForwardView(MessageObject messageObject, float x, float y) {
+        prepareFastForwardView();
+        fastForwardView.show(messageObject, x, y);
     }
 
     public boolean checkSlowMode(View view) {
@@ -35341,6 +35454,39 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 AndroidUtilities.setAdjustResizeToNothing(getParentActivity(), classGuid);
                 fragmentView.requestLayout();
             }
+        }
+
+        @Override
+        public boolean didLongPressSideButton(ChatMessageCell cell, float x, float y) {
+            if (getParentActivity() == null) {
+                return false;
+            }
+            if (chatActivityEnterView != null) {
+                chatActivityEnterView.closeKeyboard();
+            }
+            MessageObject messageObject = cell.getMessageObject();
+            if (chatMode == MODE_PINNED) {
+                return false;
+            } else if (chatMode == MODE_SAVED || (chatMode == MODE_SEARCH && searchType == SEARCH_PUBLIC_POSTS) || (UserObject.isReplyUser(currentUser) || UserObject.isUserSelf(currentUser)) && messageObject.messageOwner.fwd_from != null && messageObject.messageOwner.fwd_from.saved_from_peer != null) {
+                return false;
+            } else {
+                int[] coord = new int[2];
+                cell.getLocationInWindow(coord);
+                x += coord[0];
+                y += coord[1];
+                showFastForwardView(messageObject, x, y);
+                chatListView.startFastForward();
+                chatListView.stopScroll();
+                return true;
+            }
+        }
+
+        @Override
+        public boolean didLongPressSideButtonCancelled() {
+            if (fastForwardView == null) {
+                return false;
+            }
+            return fastForwardView.collapse();
         }
 
         @Override

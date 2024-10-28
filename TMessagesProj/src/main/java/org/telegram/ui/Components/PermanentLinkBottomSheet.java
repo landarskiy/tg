@@ -75,6 +75,8 @@ public class PermanentLinkBottomSheet extends BottomSheet {
         imageView.setAnimation(linkIcon);
         linkActionView.setUsers(0, null);
         linkActionView.hideRevokeOption(true);
+        linkActionView.showQr(true);
+        linkActionView.showOptions(false);
         linkActionView.setDelegate(() -> generateLink(true));
 
         titleView = new TextView(context);

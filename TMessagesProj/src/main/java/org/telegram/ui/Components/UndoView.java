@@ -324,6 +324,10 @@ public class UndoView extends FrameLayout {
         setVisibility(INVISIBLE);
     }
 
+    public RLottieImageView getLeftImageView() {
+        return leftImageView;
+    }
+
     public void setColors(int background, int text) {
         Theme.setDrawableColor(backgroundDrawable, background);
         infoTextView.setTextColor(text);

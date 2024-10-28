@@ -1200,6 +1200,7 @@
     <string name="ShareComment">Write a comment...</string>
     <string name="TapHereGifs">Tap here to access saved GIFs</string>
     <string name="TapHereEmoji">Tap %1$s to access more emoji.</string>
+    <string name="TapHereBot">Tap here to use this bot</string>
     <string name="PinMessage">Pin</string>
     <string name="PinNotify">Notify all members</string>
     <string name="PinAlsoFor">Also pin for %1$s</string>
@@ -4151,6 +4152,8 @@
     <string name="VoipGroupStartNow">Start Now</string>
     <string name="VoipGroupSetReminder">Set Reminder</string>
     <string name="VoipGroupCancelReminder">Cancel Reminder</string>
+    <string name="VoipGroupNotifyMe">Notify Me</string>
+    <string name="VoipGroupNotifyMeHint">You will be notified when the live stream starts.</string>
     <string name="VoipGroupScheduleInfo">Members of the group will be notified that the voice chat will start in %1$s.</string>
     <string name="VoipChannelScheduleInfo">Subscribers of the channel will be notified that the live stream will start in %1$s.</string>
     <string name="VoipChatStartsIn">Starts in</string>

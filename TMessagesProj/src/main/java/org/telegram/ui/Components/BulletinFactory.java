@@ -1311,6 +1311,18 @@ public final class BulletinFactory {
         return create(layout, Bulletin.DURATION_LONG);
     }
 
+    @CheckResult
+    public static Bulletin createLiveStreamNotificationBulletin(BaseFragment fragment, Theme.ResourcesProvider resourcesProvider) {
+        final Bulletin.LottieLayout layout = new Bulletin.LottieLayout(fragment.getParentActivity(), resourcesProvider);
+        int iconSize = AndroidUtilities.dp(36);
+        RLottieDrawable drawable = new RLottieDrawable(R.raw.voip_filled, "" + R.raw.voip_filled, iconSize, iconSize, true, null);
+        drawable.setCurrentFrame(312);
+        drawable.setCustomEndFrame(343);
+        layout.setAnimation(drawable);
+        layout.textView.setText(LocaleController.getString(R.string.VoipGroupNotifyMeHint));
+        return Bulletin.make(fragment, layout, Bulletin.DURATION_LONG);
+    }
+
     //endregion
 
     public static class UndoObject {

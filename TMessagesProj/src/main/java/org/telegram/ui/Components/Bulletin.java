@@ -1631,6 +1631,10 @@ public class Bulletin {
             }
         }
 
+        public void setAnimation(RLottieDrawable drawable) {
+            imageView.setAnimation(drawable);
+        }
+
         public void setIconPaddingBottom(int paddingBottom) {
             imageView.setLayoutParams(LayoutHelper.createFrameRelatively(56, 48 - paddingBottom, Gravity.START | Gravity.CENTER_VERTICAL, 0, 0, 0, paddingBottom));
         }

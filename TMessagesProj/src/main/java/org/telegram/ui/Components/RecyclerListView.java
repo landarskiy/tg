@@ -172,6 +172,8 @@ public class RecyclerListView extends RecyclerView {
     private int topBottomSelectorRadius;
     private int touchSlop;
 
+    boolean fastForwardGesture;
+
     boolean useRelativePositions;
     boolean multiSelectionGesture;
     boolean multiSelectionGestureStarted;
@@ -2798,12 +2800,28 @@ public class RecyclerListView extends RecyclerView {
         this.useRelativePositions = useRelativePositions;
     }
 
+    public void startFastForward() {
+        requestDisallowInterceptTouchEvent(this, false);
+        this.fastForwardGesture = true;
+    }
+
+    public boolean consumeFastForward(MotionEvent e) {
+        return false;
+    }
 
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (fastScroll != null && fastScroll.pressed) {
             return false;
         }
+        if (fastForwardGesture && e.getAction() != MotionEvent.ACTION_DOWN) {
+            fastForwardGesture = consumeFastForward(e);
+            if (!fastForwardGesture) {
+                stopScroll();
+            }
+            return true;
+        }
+        fastForwardGesture = false;
         if (multiSelectionGesture && e.getAction() != MotionEvent.ACTION_DOWN && e.getAction() != MotionEvent.ACTION_UP && e.getAction() != MotionEvent.ACTION_CANCEL) {
             if (lastX == Float.MAX_VALUE && lastY == Float.MAX_VALUE) {
                 lastX = e.getX();

@@ -49,6 +49,7 @@ import android.widget.TextView;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.Keep;
+import androidx.annotation.NonNull;
 
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -155,6 +156,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     private TextPaint gradientTextPaint;
     private StaticLayout timeLayout;
     private RectF rect = new RectF();
+    private RectF scheduleTimeRect = new RectF();
     private boolean scheduleRunnableScheduled;
     private final Runnable updateScheduleTimeRunnable = new Runnable() {
         @Override
@@ -177,6 +179,11 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             } else {
                 str = AndroidUtilities.formatFullDuration(call.call.schedule_date - currentTime);
             }
+            TLRPC.Chat currentChat = chatActivity.getCurrentChat();
+            if (currentChat != null && !ChatObject.canManageCalls(currentChat) && !call.call.schedule_start_subscribed) {
+                str = LocaleController.getString(R.string.VoipGroupNotifyMe);
+            }
+
             int width = (int) Math.ceil(gradientTextPaint.measureText(str));
             timeLayout = new StaticLayout(str, gradientTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
             AndroidUtilities.runOnUIThread(updateScheduleTimeRunnable, 1000);
@@ -321,6 +328,8 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                     int x = getMeasuredWidth() - width - AndroidUtilities.dp(10);
                     int y = AndroidUtilities.dp(10);
                     rect.set(0, 0, width, AndroidUtilities.dp(28));
+                    scheduleTimeRect.set(rect);
+                    scheduleTimeRect.offset(x, y);
                     canvas.save();
                     canvas.translate(x, y);
                     canvas.drawRoundRect(rect, AndroidUtilities.dp(16), AndroidUtilities.dp(16), gradientPaint);
@@ -748,6 +757,56 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 checkImport(false);
             }
         });
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (currentStyle == STYLE_INACTIVE_GROUP_CALL) {
+            if (fragment.getParentActivity() == null) {
+                return super.onTouchEvent(event);
+            }
+            ChatObject.Call call = chatActivity.getGroupCall();
+            TLRPC.Chat currentChat = chatActivity.getCurrentChat();
+            if (call == null || currentChat == null) {
+                return super.onTouchEvent(event);
+            }
+            if (!call.isScheduled() || ChatObject.canManageCalls(currentChat) || call.call.schedule_start_subscribed) {
+                return super.onTouchEvent(event);
+            }
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                if (scheduleTimeRect.contains(event.getX(), event.getY())) {
+                    subscribeToSchedule(call);
+                    return true;
+                }
+            }
+            return super.onTouchEvent(event);
+        }
+        return super.onTouchEvent(event);
+    }
+
+    private void subscribeToSchedule(@NonNull ChatObject.Call call) {
+        if (fragment == null || fragment.getAccountInstance() == null) {
+            return;
+        }
+        AccountInstance accountInstance = fragment.getAccountInstance();
+        TLRPC.TL_phone_toggleGroupCallStartSubscription req = new TLRPC.TL_phone_toggleGroupCallStartSubscription();
+        req.call = call.getInputGroupCall();
+        call.call.schedule_start_subscribed = !call.call.schedule_start_subscribed;
+        req.subscribed = call.call.schedule_start_subscribed;
+        accountInstance.getConnectionsManager().sendRequest(req, (response, error) -> {
+            if (response != null) {
+                accountInstance.getMessagesController().processUpdates((TLRPC.Updates) response, false);
+            }
+        });
+        if (updateScheduleTimeRunnable != null) {
+            updateScheduleTimeRunnable.run();
+        }
+        if (resourcesProvider != null) {
+            Bulletin bulletin = BulletinFactory.createLiveStreamNotificationBulletin(fragment, resourcesProvider);
+            bulletin.show();
+            View view = bulletin.getLayout();
+            view.postDelayed(() -> view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING), 300);
+        }
     }
 
     private boolean slidingSpeed;
