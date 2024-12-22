@@ -2,15 +2,11 @@ package org.telegram.ui.Stories.recorder;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.graphics.Matrix;
 import android.graphics.PointF;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.hardware.camera2.CameraAccessException;
 import android.os.Build;
-import android.text.TextUtils;
-import android.util.Log;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
@@ -26,35 +22,57 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
-import org.telegram.messenger.camera.CameraController;
-import org.telegram.messenger.camera.CameraSession;
 import org.telegram.messenger.camera.CameraSessionWrapper;
 import org.telegram.messenger.camera.CameraView;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 
-import java.util.Arrays;
-import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DualCameraView extends CameraView {
 
+    public static final String TAG_STORY = "story";
+    public static final String TAG_MESSAGES = "msg";
+    private static final String PROPERTY_DUAL_CAM = "dualcam";
+    private static final String PROPERTY_DUAL_MATRIX = "dualmatrix";
+
+    private final String tag;
     private boolean dualAvailable;
+    private boolean ignoreInteraction;
+    private boolean keepMatrixSavedWhenNotDual;
 
     public DualCameraView(Context context, boolean frontface, boolean lazy) {
+        this(context, frontface, lazy, TAG_STORY);
+    }
+
+    public DualCameraView(Context context, boolean frontface, boolean lazy, String tag) {
         super(context, frontface, lazy);
+        this.tag = tag;
         dualAvailable = dualAvailableStatic(context);
+    }
+
+    public void setIgnoreInteraction(boolean ignoreInteraction) {
+        this.ignoreInteraction = ignoreInteraction;
+    }
+
+    public void setKeepMatrixSavedWhenNotDual(boolean keepMatrixSavedWhenNotDual) {
+        this.keepMatrixSavedWhenNotDual = keepMatrixSavedWhenNotDual;
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (ignoreInteraction) {
+            return super.onTouchEvent(event);
+        }
         boolean r = touchEvent(event);
         return super.onTouchEvent(event) || r;
     }
 
     @Override
     public void destroy(boolean async, Runnable beforeDestroyRunnable) {
-        saveDual();
+        saveDualState();
         super.destroy(async, beforeDestroyRunnable);
     }
 
@@ -74,36 +92,88 @@ public class DualCameraView extends CameraView {
     private final Matrix toScreen = new Matrix();
     private final Matrix toGL = new Matrix();
 
-    private boolean firstMeasure = true;
+
+    private int lastMeasuredWidth = -1;
+    private int lastMeasuredHeight = -1;
     private boolean atTop, atBottom;
 
     private boolean enabledSavedDual;
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        saveDualIfMeasured();
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        updateScreenMatrix();
+    }
+
+    private void saveDualIfMeasured() {
+        if (lastMeasuredWidth > 0 && lastMeasuredHeight > 0) {
+            saveDualState();
+        }
+    }
+
+    @Override
+    protected void updatePixelDualWH(float[] output) {
+        int rotateDiff = Math.round(getRotateDiff());
+        if (rotateDiff % 180 == 0) {
+            output[0] = getTextureMeasuredWidth();
+            output[1] = getTextureMeasuredHeight();
+        } else {
+            output[1] = getTextureMeasuredWidth();
+            output[0] = getTextureMeasuredHeight();
+        }
+    }
+
+    private float getRotateDiff() {
+        CameraSessionWrapper cameraWrapper = getCameraSession(1);
+        float rotateDiff = 0;
+        if (cameraWrapper != null) {
+            rotateDiff = cameraWrapper.getCurrentOrientation() - cameraWrapper.getDisplayOrientation();
+        }
+        return rotateDiff;
+    }
+
+    private void updateScreenMatrix() {
         toScreen.reset();
+        toScreen.postRotate(getRotateDiff());
+        float sx = getTextureMeasuredWidth() / 2f;
+        float sy = getTextureMeasuredHeight() / 2f;
         toScreen.postTranslate(1f, -1f);
-        toScreen.postScale(getMeasuredWidth() / 2f, -getMeasuredHeight() / 2f);
+        toScreen.postScale(sx, -sy);
+        toScreen.postTranslate(
+                (getMeasuredWidth() - getTextureMeasuredWidth()) / 2f,
+                (getMeasuredHeight() - getTextureMeasuredHeight()) / 2f
+        );
         toScreen.invert(toGL);
     }
 
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        if (firstMeasure) {
+        recalculateMatrix(width, height);
+        super.onSurfaceTextureAvailable(surface, width, height);
+    }
+
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
+        recalculateMatrix(width, height);
+        super.onSurfaceTextureSizeChanged(surfaceTexture, width, height);
+    }
+
+    private void recalculateMatrix(int width, int height) {
+        if (lastMeasuredWidth != width || lastMeasuredHeight != height) {
             if (isSavedDual()) {
                 enabledSavedDual = true;
                 setupDualMatrix();
                 super.dual = true;
             }
-            firstMeasure = false;
+            lastMeasuredWidth = width;
+            lastMeasuredHeight = height;
         }
-        super.onSurfaceTextureAvailable(surface, width, height);
     }
 
     @Override
     protected void onDualCameraSuccess() {
-        saveDual();
+        saveDualState();
         if (enabledSavedDual) {
             onSavedDualCameraSuccess();
         }
@@ -160,26 +230,42 @@ public class DualCameraView extends CameraView {
     private void setupDualMatrix() {
         Matrix matrix = getDualPosition();
         matrix.reset();
-        boolean setDefault = true;
         Matrix savedMatrix = getSavedDualMatrix();
         if (savedMatrix != null) {
             matrix.set(savedMatrix);
-            setDefault = false;
-        }
-
-        if (setDefault) {
-            matrix.postConcat(toScreen);
-
-            float w = getMeasuredWidth() * .43f;
-            float h = getMeasuredHeight() * .43f;
-            float px = Math.min(getMeasuredWidth(), getMeasuredWidth()) * .025f;
-            float py = px * 2;
-
-            matrix.postScale(w / getMeasuredWidth(), h / getMeasuredHeight());
-            matrix.postTranslate(getMeasuredWidth() - px - w, px);
-            matrix.postConcat(toGL);
+        } else {
+            updateDualMatrix(matrix);
         }
         updateDualPosition();
+    }
+
+    private void updateDualMatrix(Matrix matrix) {
+        matrix.postConcat(toScreen);
+
+        float textureW = getTextureMeasuredWidth();
+        float viewW = getMeasuredWidth();
+        float textureH = getTextureMeasuredHeight();
+        float viewH = getMeasuredHeight();
+
+        float dx = (textureW - viewW) / 2f;
+        float dy = (textureH - viewH) / 2f;
+        float scale = Math.min(viewW / textureW, viewH / textureH);
+        float w = textureW * .43f * scale;
+        float h = textureH * .43f * scale;
+        float px;
+        if (viewW > viewH) {
+            px = viewW * .04f;
+        } else {
+            px = viewW * .025f;
+        }
+
+        float sx = w / textureW;
+        float sy = h / textureH;
+
+        matrix.postTranslate(dx, dy);
+        matrix.postScale(sx, sy);
+        matrix.postTranslate(viewW - px - w, px);
+        matrix.postConcat(toGL);
     }
 
     public boolean isAtDual(float x, float y) {
@@ -576,11 +662,11 @@ public class DualCameraView extends CameraView {
     }
 
     public static boolean dualAvailableStatic(Context context) {
-        return MessagesController.getGlobalMainSettings().getBoolean("dual_available", dualAvailableDefault(context, true));
+        return getSettings().getBoolean("dual_available", dualAvailableDefault(context, true));
     }
 
     public static boolean roundDualAvailableStatic(Context context) {
-        return MessagesController.getGlobalMainSettings().getBoolean("rounddual_available", roundDualAvailableDefault(context));
+        return getSettings().getBoolean("rounddual_available", roundDualAvailableDefault(context));
     }
 
     public static boolean roundDualAvailableDefault(Context context) {
@@ -594,7 +680,7 @@ public class DualCameraView extends CameraView {
 
 
     private Matrix getSavedDualMatrix() {
-        String str = MessagesController.getGlobalMainSettings().getString("dualmatrix", null);
+        String str = getSettings().getString(getSizeKey(PROPERTY_DUAL_MATRIX), null);
         if (str == null) {
             return null;
         }
@@ -617,23 +703,66 @@ public class DualCameraView extends CameraView {
     }
 
     public boolean isSavedDual() {
-        return dualAvailableStatic(getContext()) && MessagesController.getGlobalMainSettings().getBoolean("dualcam", dualAvailableDefault(ApplicationLoader.applicationContext, false));
+        return dualAvailableStatic(getContext()) && getSettings().getBoolean(getKey(PROPERTY_DUAL_CAM), dualAvailableDefault(ApplicationLoader.applicationContext, false));
     }
 
     private void resetSavedDual() {
-        MessagesController.getGlobalMainSettings().edit().putBoolean("dualcam", false).remove("dualmatrix").apply();
+        SharedPreferences.Editor editor = getSettings()
+                .edit()
+                .putBoolean(getKey(PROPERTY_DUAL_CAM), false);
+        if (!keepMatrixSavedWhenNotDual) {
+            for (String key : getPropertyKeys(PROPERTY_DUAL_MATRIX)) {
+                editor.remove(key);
+            }
+        }
+        editor.apply();
     }
 
-    private void saveDual() {
+    private static SharedPreferences getSettings() {
+        return MessagesController.getGlobalMainSettings();
+    }
+
+    public void saveDualState() {
+        String dualCamKey = getKey(PROPERTY_DUAL_CAM);
+        String dualMatrixKey = getSizeKey(PROPERTY_DUAL_MATRIX);
         SharedPreferences.Editor edit = MessagesController.getGlobalMainSettings().edit();
-        edit.putBoolean("dualcam", isDual());
+        edit.putBoolean(dualCamKey, isDual());
         if (isDual()) {
             float[] values = new float[9];
             getDualPosition().getValues(values);
-            edit.putString("dualmatrix", Floats.join(";", values));
-        } else {
-            edit.remove("dualmatrix");
+            edit.putString(dualMatrixKey, Floats.join(";", values));
+        } else if (!keepMatrixSavedWhenNotDual) {
+            edit.remove(dualMatrixKey);
         }
         edit.apply();
+    }
+
+    public void updateSaveDualState(boolean isDual) {
+        String dualCamKey = getKey(PROPERTY_DUAL_CAM);
+        SharedPreferences.Editor edit = MessagesController.getGlobalMainSettings().edit();
+        edit.putBoolean(dualCamKey, isDual);
+        edit.apply();
+    }
+
+    private String getKey(String propertyName) {
+        return propertyName + "_" + tag;
+    }
+
+    private String getSizeKey(String propertyName) {
+        return getKey(propertyName) + "_" + getTextureMeasuredWidth() + "x" + getTextureMeasuredHeight();
+    }
+
+    private List<String> getPropertyKeys(String propertyName) {
+        List<String> keys = new ArrayList<>();
+        for (String key : getSettings().getAll().keySet()) {
+            if (isKeyForCurrentTag(key, propertyName)) {
+                keys.add(key);
+            }
+        }
+        return keys;
+    }
+
+    private boolean isKeyForCurrentTag(String key, String propertyName) {
+        return key.startsWith(propertyName + "_" + tag);
     }
 }

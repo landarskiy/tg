@@ -484,6 +484,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
             int frameWidth, frameHeight;
             if ((lastWidth != width || lastHeight != height) && measurementsCount > 1) {
                 cameraSession[0].updateRotation();
+                if (cameraSession[1] != null) {
+                    cameraSession[1].updateRotation();
+                }
             }
             measurementsCount++;
             if (cameraSession[0].getWorldAngle() == 90 || cameraSession[0].getWorldAngle() == 270) {
@@ -502,11 +505,30 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
         lastWidth = width;
         lastHeight = height;
 
-        pixelW = getMeasuredWidth();
-        pixelH = getMeasuredHeight();
-        if (pixelDualW <= 0) {
-            pixelDualW = getMeasuredWidth();
-            pixelDualH = getMeasuredHeight();
+        updatePixelSizes();
+    }
+
+    private void updatePixelSizes() {
+        updatePixelWH(tempPixelWH);
+        pixelW = tempPixelWH[0];
+        pixelH = tempPixelWH[1];
+
+        tempPixelWH[0] = pixelDualW;
+        tempPixelWH[1] = pixelDualH;
+        updatePixelDualWH(tempPixelWH);
+        pixelDualW = tempPixelWH[0];
+        pixelDualH = tempPixelWH[1];
+    }
+
+    protected void updatePixelWH(float[] output) {
+        output[0] = getMeasuredWidth();
+        output[1] = getMeasuredHeight();
+    }
+
+    protected void updatePixelDualWH(float[] output) {
+        if (output[0] <= 0) {
+            output[0] = getMeasuredWidth();
+            output[1] = getMeasuredHeight();
         }
     }
 
@@ -795,6 +817,14 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
                 showTexture(true, true);
             }
         }
+    }
+
+    protected int getTextureMeasuredWidth() {
+        return textureView.getMeasuredWidth();
+    }
+
+    protected int getTextureMeasuredHeight() {
+        return textureView.getMeasuredHeight();
     }
 
     private ValueAnimator textureViewAnimator;
@@ -1157,6 +1187,7 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     private final int[][] cameraTexture = new int[2][1];
     private VideoRecorder videoEncoder;
 
+    private final float[] tempPixelWH = new float[2];
     private volatile float pixelW, pixelH;
     private volatile float pixelDualW, pixelDualH;
     private volatile float lastShapeTo;

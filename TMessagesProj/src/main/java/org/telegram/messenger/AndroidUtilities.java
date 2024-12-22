@@ -6314,4 +6314,37 @@ public class AndroidUtilities {
         }
     }
 
+    public static int[] getImageSize(String path) {
+        int[] size = new int[2];
+        if (path != null) {
+            try {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, options);
+                size[0] = options.outWidth;
+                size[1] = options.outHeight;
+            } catch (Exception ignore) {
+            }
+        }
+        return size;
+    }
+
+    public static void gone(View view) {
+        if (view != null) {
+            view.setVisibility(View.GONE);
+        }
+    }
+
+    public static void visible(View view) {
+        if (view != null) {
+            view.setVisibility(View.VISIBLE);
+        }
+    }
+
+    public static void invisible(View view) {
+        if (view != null) {
+            view.setVisibility(View.INVISIBLE);
+        }
+    }
+
 }
